@@ -1,8 +1,8 @@
 name: upstream sync + nightly macOS DMG
 
 # This workflow is intentionally separate from release-dmg.yml. It keeps the
-# fork's custom branch current and produces a short-lived Actions artifact; it
-# never creates or publishes a GitHub Release.
+# fork's custom branch current, produces a short-lived Actions artifact, and
+# updates one rolling GitHub prerelease for convenient DMG downloads.
 #
 # Keep this file on the fork's default `main` branch so GitHub's scheduled
 # trigger can run it. The build itself checks out TARGET_BRANCH, which is the
@@ -240,5 +240,58 @@ jobs:
             echo "- Source commit: \\`${{ needs.sync.outputs.head_sha }}\\`"
             echo "- Package version: \\`${{ needs.sync.outputs.version }}\\`"
             echo "- Artifact retention: 14 days"
-            echo "- Formal GitHub Release: not created"
+            echo "- Rolling GitHub prerelease: [nightly](https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly)"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  publish-nightly:
+    name: Publish rolling nightly DMG release
+    needs: [sync, build]
+    if: ${{ needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download nightly DMG artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: TokenTrackerBar-dmg-${{ needs.sync.outputs.version }}-${{ needs.sync.outputs.head_sha }}
+          path: release-assets
+
+      - name: Publish rolling nightly release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.sync.outputs.version }}
+          HEAD_SHA: ${{ needs.sync.outputs.head_sha }}
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+        run: |
+          set -euo pipefail
+          tag="nightly"
+          asset="release-assets/TokenTrackerBar.dmg"
+          test -f "$asset"
+
+          notes="$(mktemp)"
+          {
+            echo "Nightly macOS DMG built from the fork's custom collectors branch."
+            echo
+            echo "- Source branch: \`$TARGET_BRANCH\`"
+            echo "- Source commit: \`$HEAD_SHA\`"
+            echo "- Package version: \`$VERSION\`"
+            echo "- This rolling prerelease is replaced by the next successful build."
+          } > "$notes"
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" \
+              --title "Nightly DMG" \
+              --notes-file "$notes" \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" "$asset" \
+              --target "$HEAD_SHA" \
+              --prerelease \
+              --title "Nightly DMG" \
+              --notes-file "$notes" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
+          echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"

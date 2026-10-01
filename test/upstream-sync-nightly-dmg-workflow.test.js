@@ -38,7 +38,7 @@ test("upstream conflicts stop before pushing the fork branch", () => {
   assert.match(content, /git push origin "HEAD:\$\{TARGET_BRANCH\}"/);
 });
 
-test("nightly workflow builds a macOS DMG without creating releases", () => {
+test("nightly workflow builds a macOS DMG and publishes a rolling release", () => {
   const content = loadWorkflow();
   assert.match(content, /runs-on:\s*macos-26/);
   assert.match(content, /npm run dashboard:build/);
@@ -47,9 +47,15 @@ test("nightly workflow builds a macOS DMG without creating releases", () => {
   assert.match(content, /xcodebuild/);
   assert.match(content, /scripts\/create-dmg\.sh/);
   assert.match(content, /actions\/upload-artifact@v4/);
+  assert.match(content, /actions\/download-artifact@v4/);
   assert.match(content, /retention-days:\s*14/);
-  assert.doesNotMatch(content, /gh release create/);
-  assert.doesNotMatch(content, /gh release upload/);
+  assert.match(content, /publish-nightly:/);
+  assert.match(content, /tag="nightly"/);
+  assert.match(content, /gh release create/);
+  assert.match(content, /gh release upload/);
+  assert.match(content, /--clobber/);
+  assert.match(content, /--prerelease/);
+  assert.match(content, /needs:\s*\[sync, build\]/);
 });
 
 test("scheduled runs skip redundant builds while manual runs can rebuild", () => {
