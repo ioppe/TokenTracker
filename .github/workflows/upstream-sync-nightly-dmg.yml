@@ -1,0 +1,244 @@
+name: upstream sync + nightly macOS DMG
+
+# This workflow is intentionally separate from release-dmg.yml. It keeps the
+# fork's custom branch current and produces a short-lived Actions artifact; it
+# never creates or publishes a GitHub Release.
+#
+# Keep this file on the fork's default `main` branch so GitHub's scheduled
+# trigger can run it. The build itself checks out TARGET_BRANCH, which is the
+# branch containing the fork-specific collectors.
+
+on:
+  schedule:
+    # GitHub cron uses UTC. Run once per day at 03:15 UTC.
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Fork branch to update and build"
+        required: false
+        default: "custom-collectors"
+        type: string
+      upstream_ref:
+        description: "Upstream branch to merge"
+        required: false
+        default: "main"
+        type: string
+
+concurrency:
+  group: upstream-sync-nightly-dmg
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  # The package.json repository URL and README identify this as the upstream.
+  # Change this value if the fork is later based on a different repository.
+  UPSTREAM_REPOSITORY: xiufengsun/TokenTracker
+  TARGET_BRANCH: ${{ inputs.target_branch || 'custom-collectors' }}
+  UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+
+jobs:
+  sync:
+    name: Sync upstream into fork branch
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      head_sha: ${{ steps.merge.outputs.head_sha }}
+      version: ${{ steps.merge.outputs.version }}
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags --prune upstream "${UPSTREAM_REF}"
+          if ! git show-ref --verify --quiet "refs/remotes/upstream/${UPSTREAM_REF}"; then
+            echo "::error title=Upstream ref not found::${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} was not fetched"
+            exit 1
+          fi
+
+      - name: Merge upstream without hiding conflicts
+        id: merge
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          before_sha="$(git rev-parse HEAD)"
+          if ! git merge --no-edit "upstream/${UPSTREAM_REF}"; then
+            echo "::group::Conflicting files"
+            git diff --name-only --diff-filter=U || true
+            echo "::endgroup::"
+            git merge --abort || true
+            echo "::error title=Upstream merge conflict::Resolve the conflict in ${TARGET_BRANCH}, then rerun this workflow"
+            exit 1
+          fi
+
+          after_sha="$(git rev-parse HEAD)"
+          changed=false
+          if [[ "${before_sha}" != "${after_sha}" ]]; then
+            changed=true
+            git push origin "HEAD:${TARGET_BRANCH}"
+          else
+            echo "Upstream is already up to date."
+          fi
+
+          version="$(node -p "require('./package.json').version")"
+          {
+            echo "changed=${changed}"
+            echo "head_sha=${after_sha}"
+            echo "version=${version}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Target branch: ${TARGET_BRANCH}"
+          echo "Upstream: ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF}"
+          echo "Source commit: ${after_sha}"
+          echo "Package version: ${version}"
+
+  build:
+    name: Build nightly DMG
+    needs: sync
+    # Scheduled runs build only when upstream advanced. Manual dispatch is a
+    # convenient way to rebuild the current fork branch on demand.
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.sync.outputs.changed == 'true' }}
+    runs-on: macos-26
+    steps:
+      - name: Check out merged source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.sync.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            dashboard/package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install dashboard dependencies
+        run: npm ci --prefix dashboard --no-audit --no-fund
+
+      - name: Validate merged source
+        run: |
+          npm run validate:versions
+          npm run validate:guardrails
+
+      - name: Build dashboard
+        env:
+          VITE_INSFORGE_BASE_URL: https://srctyff5.us-east.insforge.app
+          VITE_INSFORGE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY
+        run: npm run dashboard:build
+
+      - name: Cache Node.js binaries for EmbeddedServer
+        uses: actions/cache@v6
+        with:
+          path: /tmp/node-cache
+          key: node-darwin-universal-22.22.2
+
+      - name: Bundle EmbeddedServer
+        env:
+          NODE_CACHE_DIR: /tmp/node-cache
+        run: bash TokenTrackerBar/scripts/bundle-node.sh
+
+      - name: Install macOS packaging tools
+        run: brew install xcodegen create-dmg
+
+      - name: Generate Xcode project
+        working-directory: TokenTrackerBar
+        run: |
+          xcodegen generate
+          ruby scripts/patch-pbxproj-icon.rb
+
+      - name: Build TokenTrackerBar
+        working-directory: TokenTrackerBar
+        run: |
+          xcodebuild \
+            -scheme TokenTrackerBar \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            OTHER_SWIFT_FLAGS="\$(inherited) -Xfrontend -solver-expression-time-threshold=120" \
+            clean build
+
+          APP_BIN="$(find build/DerivedData/Build/Products/Release -name 'TokenTracker' -path '*/MacOS/*' -maxdepth 5)"
+          lipo -info "${APP_BIN}"
+          if ! lipo -info "${APP_BIN}" 2>&1 | grep -q "x86_64"; then
+            echo "::error::Nightly app is not universal; the x86_64 slice is missing"
+            exit 1
+          fi
+
+      - name: Ad-hoc sign app
+        working-directory: TokenTrackerBar
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find build/DerivedData/Build/Products/Release -name 'TokenTracker.app' -maxdepth 1)"
+          APPEX_PATH="${APP_PATH}/Contents/PlugIns/TokenTrackerWidget.appex"
+
+          find "${APP_PATH}/Contents/Resources/EmbeddedServer" -type f \
+            \( -name 'node' -o -name '*.dylib' -o -name '*.so' -o -name '*.node' \) \
+            -exec codesign --force --timestamp=none --sign - {} \;
+
+          if [ -d "${APPEX_PATH}" ]; then
+            codesign --force --timestamp=none \
+              --entitlements TokenTrackerWidget/TokenTrackerWidget.entitlements \
+              --sign - "${APPEX_PATH}"
+          fi
+
+          codesign --force --timestamp=none \
+            --entitlements TokenTrackerBar/TokenTrackerBar.entitlements \
+            --sign - "${APP_PATH}"
+          codesign --verify --verbose=2 "${APP_PATH}"
+
+          if [ -d "${APPEX_PATH}" ]; then
+            codesign -d --entitlements - "${APPEX_PATH}" 2>&1 | tee /tmp/nightly-appex-entitlements.txt
+            if ! grep -q "com.apple.security.app-sandbox" /tmp/nightly-appex-entitlements.txt; then
+              echo "::error::Widget extension lost com.apple.security.app-sandbox"
+              exit 1
+            fi
+          fi
+
+      - name: Create DMG
+        working-directory: TokenTrackerBar
+        env:
+          CI: "true"
+        run: |
+          APP_PATH="$(find build/DerivedData/Build/Products/Release -name 'TokenTracker.app' -maxdepth 1)"
+          bash scripts/create-dmg.sh "${APP_PATH}"
+
+      - name: Upload nightly DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TokenTrackerBar-dmg-${{ needs.sync.outputs.version }}-${{ needs.sync.outputs.head_sha }}
+          path: TokenTrackerBar/build/TokenTrackerBar.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Write build summary
+        run: |
+          {
+            echo "### Nightly DMG"
+            echo ""
+            echo "- Source branch: \\`${TARGET_BRANCH}\\`"
+            echo "- Source commit: \\`${{ needs.sync.outputs.head_sha }}\\`"
+            echo "- Package version: \\`${{ needs.sync.outputs.version }}\\`"
+            echo "- Artifact retention: 14 days"
+            echo "- Formal GitHub Release: not created"
+          } >> "${GITHUB_STEP_SUMMARY}"
