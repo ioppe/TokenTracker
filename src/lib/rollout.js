@@ -49,6 +49,12 @@ const {
 const { USD_TICKS_PER_USD, normalizeGrokUsage } = require("./grok-usage");
 const { resolveTraeDbPaths, readTraeUsageRows } = require("./trae-db");
 const { normalizeTraeUsage, normalizeTraeModel, traeTimestamp } = require("./trae-usage");
+const {
+  PI_DESKTOP_SOURCE,
+  buildPiDesktopUsageEvents,
+  readPiDesktopUsageRows,
+  resolvePiDesktopDbPath,
+} = require("./pi-desktop-usage");
 
 const DEFAULT_SOURCE = "codex";
 const DEFAULT_MODEL = "unknown";
@@ -13878,13 +13884,13 @@ function devinStringMap(value) {
 // normalizers copy the bucket maps but alias each bucket/totals object, and
 // the enqueue helpers stamp queuedKey before appendFile runs — so a failed
 // append used to leave the caller's published state polluted. Only
-// devin-owned entries get private copies; every other provider's buckets
+// source-owned entries get private copies; every other provider's buckets
 // stay shared read-only references.
-function stageDevinBuckets(buckets, isDevinBucket) {
+function stageUsageBuckets(buckets, ownsBucket) {
   const staged = {};
   for (const [key, bucket] of Object.entries(buckets || {})) {
     staged[key] =
-      bucket && typeof bucket === "object" && isDevinBucket(key, bucket)
+      bucket && typeof bucket === "object" && ownsBucket(key, bucket)
         ? {
             ...bucket,
             totals:
@@ -13973,7 +13979,7 @@ async function parseDevinIncremental({
   // rows recover either queue. Unrelated providers' buckets stay shared
   // read-only references (this parser never writes their keys).
   const hourlyState = normalizeHourlyState(cursors?.hourly);
-  hourlyState.buckets = stageDevinBuckets(
+  hourlyState.buckets = stageUsageBuckets(
     hourlyState.buckets,
     (key) =>
       (normalizeSourceInput(parseBucketKey(key).source) || DEFAULT_SOURCE) ===
@@ -13992,7 +13998,7 @@ async function parseDevinIncremental({
   if (projectState) {
     // Project bucket keys are `projectKey|source|hourStart`; this parser only
     // ever looks up keys whose middle segment is the devin source.
-    projectState.buckets = stageDevinBuckets(projectState.buckets, (key) => {
+    projectState.buckets = stageUsageBuckets(projectState.buckets, (key) => {
       const last = key.lastIndexOf(BUCKET_SEPARATOR);
       const prev = last > 0 ? key.lastIndexOf(BUCKET_SEPARATOR, last - 1) : -1;
       const source = prev >= 0 ? key.slice(prev + 1, last) : "";
@@ -14187,6 +14193,93 @@ async function parseDevinIncremental({
     bucketsQueued,
     projectBucketsQueued,
   };
+}
+
+// PI Desktop stores cumulative per-turn counters in ~/.pi-desktop/pi.sqlite,
+// not in the Pi CLI transcript format. Reconcile a retained turn ledger:
+// completed/error/aborted turns count once, corrections replace their previous
+// contribution, and pruning the application's history never refunds usage.
+async function parsePiDesktopIncremental({
+  dbPath, cursors, queuePath, onProgress, env, sqliteOptions,
+} = {}) {
+  const empty = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  const resolvedDb = dbPath || resolvePiDesktopDbPath(env || process.env);
+  if (!resolvedDb || !fssync.existsSync(resolvedDb)) return empty;
+  const prior = cursors.piDesktop || {};
+  const initialFingerprint = devinSqliteFingerprint(resolvedDb);
+  if (sameSqliteFingerprint(initialFingerprint, prior.fingerprint)) return empty;
+
+  const rows = await readPiDesktopUsageRows(resolvedDb, sqliteOptions);
+  const events = buildPiDesktopUsageEvents(rows);
+  const turns = devinStringMap(prior.turns);
+  const hourlyState = normalizeHourlyState(cursors.hourly);
+  hourlyState.buckets = stageUsageBuckets(
+    hourlyState.buckets,
+    (key) => parseBucketKey(key).source === PI_DESKTOP_SOURCE,
+  );
+  hourlyState.groupQueued = { ...hourlyState.groupQueued };
+  const touchedBuckets = new Set();
+  const countedSessions = new Set(Object.values(turns)
+    .filter((turn) => turn?.totals?.conversation_count > 0)
+    .map((turn) => turn.sessionId));
+  let eventsAggregated = 0;
+
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index];
+    const bucketStart = toUtcHalfHourStart(new Date(event.tsMs).toISOString());
+    const previous = turns[event.requestId];
+    // Ignore empty new turns, but reconcile a previously counted turn whose
+    // counters were corrected to zero rather than retaining stale spend.
+    if (!previous && event.totals.total_tokens === 0) continue;
+    event.totals.conversation_count = previous
+      ? counterConversation(previous.totals?.conversation_count)
+      : countedSessions.has(event.sessionId) ? 0 : 1;
+    countedSessions.add(previous?.sessionId || event.sessionId);
+    const unchanged = previous?.totals &&
+      totalsKey(previous.totals) === totalsKey(event.totals) &&
+      previous.bucketStart === bucketStart && previous.model === event.model;
+    if (!unchanged) {
+      if (previous?.totals && previous.bucketStart && previous.model) {
+        const old = getHourlyBucket(hourlyState, PI_DESKTOP_SOURCE,
+          previous.model, previous.bucketStart);
+        subtractTotals(old.totals, previous.totals);
+        touchedBuckets.add(bucketKey(PI_DESKTOP_SOURCE, previous.model, previous.bucketStart));
+      }
+      const bucket = getHourlyBucket(hourlyState, PI_DESKTOP_SOURCE, event.model, bucketStart);
+      addTotals(bucket.totals, event.totals);
+      touchedBuckets.add(bucketKey(PI_DESKTOP_SOURCE, event.model, bucketStart));
+      turns[event.requestId] = {
+        sessionId: previous?.sessionId || event.sessionId,
+        model: event.model,
+        bucketStart,
+        totals: event.totals,
+      };
+      eventsAggregated += 1;
+    }
+    if (typeof onProgress === "function") {
+      onProgress({ index: index + 1, total: events.length,
+        recordsProcessed: index + 1, eventsAggregated, bucketsQueued: touchedBuckets.size });
+    }
+  }
+
+  await ensureDir(path.dirname(queuePath));
+  const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
+  const finalFingerprint = devinSqliteFingerprint(resolvedDb);
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.piDesktop = {
+    version: 1,
+    turns,
+    fingerprint: sameSqliteFingerprint(initialFingerprint, finalFingerprint)
+      ? finalFingerprint : initialFingerprint,
+    updatedAt,
+  };
+  return { recordsProcessed: rows.length, eventsAggregated, bucketsQueued };
+}
+
+function counterConversation(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -24532,6 +24625,8 @@ module.exports = {
   resolvePiSessionFiles,
   resolvePiDefaultModel,
   parsePiIncremental,
+  resolvePiDesktopDbPath,
+  parsePiDesktopIncremental,
   piAgentDirCollidesWithOmp,
   omoAgentDirCollidesWithOmp,
   resolvePrimeAgentHome,

@@ -18,6 +18,7 @@ const {
   updateJsonLocked,
 } = require("../lib/fs");
 const { physicalJsonlRecords } = require("../lib/jsonl-lines");
+const { discoverClaudeDesktopProfiles, claudeDesktopTranscriptDirs } = require("../lib/claude-desktop");
 const { countRecordOnlyFiles, formatRecordOnlyWarning } = require("../lib/codex-usage-record");
 const {
   listRolloutFiles,
@@ -89,6 +90,8 @@ const {
   omoAgentDirCollidesWithOmp,
   resolvePiSessionFiles,
   parsePiIncremental,
+  resolvePiDesktopDbPath,
+  parsePiDesktopIncremental,
   piAgentDirCollidesWithOmp,
   resolvePrimeAgentSessionFiles,
   parsePrimeAgentIncremental,
@@ -308,6 +311,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "antigravity",
   "anythingllm",
   "claude",
+  "claude-desktop",
   "claude-science",
   "cline",
   "codebuddy",
@@ -337,6 +341,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "opencode",
   "openclaw",
   "pi",
+  "pi-desktop",
   "qoder",
   "qoder-cn",
   "reasonix",
@@ -349,11 +354,14 @@ const AUTO_SYNC_SOURCES = new Set([
   "zed",
 ]);
 const BACKGROUND_AUTO_SYNC_SOURCES = new Set([
-  // Keep unscoped native 5-minute syncs bounded to dated local session trees.
+  // Keep native 5-minute syncs bounded: desktop-only Claude log roots and a
+  // fingerprinted PI database do not require a full Claude Code/Pi CLI scan.
   "acode",
   "codex",
   "every-code",
   "reasonix",
+  "claude-desktop",
+  "pi-desktop",
 ]);
 
 function warnProviderParseFailure(label, err, opts) {
@@ -674,9 +682,16 @@ async function cmdSync(argv, context = {}) {
     // projects/ level: two profiles may symlink one projects/ dir, and reading
     // it under both spellings would double-parse every file, leaving
     // correctness to the bounded claudeHashes layer.
+    const desktopProfiles = discoverClaudeDesktopProfiles({ home, env: process.env, config });
+    const desktopTranscriptDirs = appendUniqueDirs(
+      Array.isArray(cursors.claudeDesktop?.transcriptDirs)
+        ? cursors.claudeDesktop.transcriptDirs : [],
+      claudeDesktopTranscriptDirs(desktopProfiles),
+    );
     const claudeProjectsDirs = appendUniqueDirs(
       claudeInstallHomes.map((h) => path.join(h, "projects")),
-      extraScanRootPaths(scanRoots.claude).map((h) => path.join(h, "projects")),
+      [...extraScanRootPaths(scanRoots.claude).map((h) => path.join(h, "projects")),
+        ...desktopTranscriptDirs],
     );
     const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
     const kiloHome = process.env.KILO_HOME || path.join(xdgDataHome, "kilo");
@@ -1098,9 +1113,12 @@ async function cmdSync(argv, context = {}) {
     openclawResult.bucketsQueued += openclawFallback.bucketsQueued;
 
     let claudeFiles = [];
-    if (sourceAllowed("claude")) {
+    if (sourceAllowed("claude", "claude-desktop")) {
+      const desktopOnly = autoSourceScope === "claude-desktop" ||
+        (isBackgroundLightweightSync && !isBackgroundAllLocalSync && !autoSourceScope);
+      const scanDirs = desktopOnly ? desktopTranscriptDirs : claudeProjectsDirs;
       const seenClaudeFiles = new Set();
-      for (const dir of claudeProjectsDirs) {
+      for (const dir of scanDirs) {
         for (const f of await listClaudeProjectFiles(dir)) {
           if (!seenClaudeFiles.has(f)) {
             seenClaudeFiles.add(f);
@@ -1108,6 +1126,9 @@ async function cmdSync(argv, context = {}) {
           }
         }
       }
+      // Retain discovered roots so a temporarily missing account directory
+      // cannot be omitted from a later ground-truth rebuild of shared history.
+      cursors.claudeDesktop = { transcriptDirs: desktopTranscriptDirs };
     }
     if (isFullSourceScan) {
       await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath, queueStatePath });
@@ -1138,6 +1159,11 @@ async function cmdSync(argv, context = {}) {
           return !projectsState.exists && rootPreviouslySuppliedFiles(entry.path);
         })
         .map((entry) => entry.path);
+      for (const dir of desktopTranscriptDirs) {
+        const state = scanRootDirState(dir);
+        const suppliedFiles = cursorFilePaths.some((filePath) => filePath.startsWith(dir + path.sep));
+        if (state.error || (!state.exists && suppliedFiles)) unavailableClaudeRoots.push(dir);
+      }
       if (unavailableClaudeRoots.length > 0) {
         if (!opts.auto) {
           process.stderr.write(
@@ -2658,6 +2684,22 @@ async function cmdSync(argv, context = {}) {
       }
     }
 
+    // PI Desktop has a distinct SQLite format; do not send its flat JSONL
+    // files to the Pi CLI parser or count the same turn twice.
+    let piDesktopResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    if (sourceAllowed("pi-desktop")) {
+      try {
+        piDesktopResult = await parsePiDesktopIncremental({
+          dbPath: resolvePiDesktopDbPath(process.env),
+          cursors,
+          queuePath,
+          onProgress: makeProviderProgress("PI Desktop"),
+        });
+      } catch (err) {
+        warnProviderParseFailure("PI Desktop", err, opts);
+      }
+    }
+
     // ── Prime Agent — passive ~/.prime/agent/sessions/*.jsonl usage reader ──
     let primeAgentResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const primeAgentFiles = sourceAllowed("prime-agent")
@@ -3214,6 +3256,7 @@ async function cmdSync(argv, context = {}) {
       ompResult.recordsProcessed +
       omoResult.recordsProcessed +
       piResult.recordsProcessed +
+      piDesktopResult.recordsProcessed +
       primeAgentResult.recordsProcessed +
       minimaxCodeResult.recordsProcessed +
       craftResult.recordsProcessed +
@@ -3258,6 +3301,7 @@ async function cmdSync(argv, context = {}) {
       ompResult.bucketsQueued +
       omoResult.bucketsQueued +
       piResult.bucketsQueued +
+      piDesktopResult.bucketsQueued +
       primeAgentResult.bucketsQueued +
       minimaxCodeResult.bucketsQueued +
       craftResult.bucketsQueued +

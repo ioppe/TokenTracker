@@ -188,6 +188,8 @@ brew install xiufengsun/tokentracker/tokentracker
 | **Kilo CLI** (kilo.ai) | ✅ 自动 | 被动读取 SQLite（`~/.local/share/kilo/kilo.db`，OpenCode-fork schema） |
 | **Kilo Code** (VS Code 插件) | ✅ 自动 | 被动读取 `ui_messages.json`（Cursor / VS Code / CodeBuddy / Windsurf 的 globalStorage） |
 | **pi** (`@mariozechner/pi-coding-agent`) | ✅ 自动 | 被动读取（`~/.pi/agent/sessions/**/*.jsonl`） |
+| **PI Desktop**（本地 fork） | ✅ 自动 | 只读 `~/.pi-desktop/pi.sqlite` 的 `turns` 用量计数，独立 `pi-desktop` 来源；包含缓存输入，推理不重复计数 |
+| **Claude Desktop 多账号**（本地 fork） | 有条件 | 自动发现默认 App 目录及 `~/.claudeN`，仅采集 `projects/`、`claude-code-sessions/` 中含明确用量的 JSONL；无 Token 日志的普通聊天/Cowork 不可统计 |
 | **Dots** | ✅ 自动 | 通过 pi 的 provider 拆分路由（`pi-dots` source，复用同一被动读取器）—— 无需额外 hook |
 | **Prime Agent** | ✅ 自动 | 仅元数据的被动用量读取（`~/.prime/agent/sessions/*.jsonl`，不读取提示词或回复） |
 | **Craft Agents** | ✅ 自动 | 被动读取 session（`~/.craft-agent` + workspace session logs） |
@@ -223,6 +225,28 @@ brew install xiufengsun/tokentracker/tokentracker
 > 更深入的资料：[OpenClaw 集成与排障](docs/openclaw-integration.md)。升级 v0.96.0 后 ZCode 历史总量下降，请参阅 [ZCode 历史计数修正说明](docs/zcode-history-correction.md)，了解缓存/推理重复计数修正及本地备份。
 
 工具没在列表里？[提个 Issue](https://github.com/xiufengsun/TokenTracker/issues/new) —— 加一个新 provider 通常只是加一个 parser 文件的事。
+
+### 本地 fork：PI Desktop 与 Claude 独立账号目录
+
+PI Desktop 的数据格式不同于 Pi CLI。本分支只读数据库中的回合用量，不读取
+消息正文、登录信息或会话标题。已结束的成功、失败、取消回合，只要记录了消耗
+就计入；运行中的回合结束后再采集。重复刷新不重复累计，用量修正会替换旧值，
+删除应用历史不会清除已统计的数据。缓存读取单独计入输入，推理已包含在输出中。
+成本是模型价格估算，不代表第三方服务的账单；本采集器暂不归属 PI Desktop 项目。
+
+Claude 自动发现默认应用目录和 `.claude1`、`.claude2` 等独立账号目录，仅扫描
+`projects/` 与 `claude-code-sessions/` 下的已知 JSONL 格式，复用 Claude 解析与去重。
+不会扫描 Cowork 工作区、读取 Cookie 或凭据，也不会将额度百分比换算为 Token。
+没有明确用量日志时，`status --json` 会显示 `token_logs_unavailable`，不表示消耗为零。
+App 与 CLI 日志仍归入同一个 `claude` 来源，防止复制会话导致重复统计。
+
+非默认路径可用 `TOKENTRACKER_PI_DESKTOP_DB` 指定数据库文件，或用
+`TOKENTRACKER_CLAUDE_DESKTOP_HOME` 指定一个自定义 App 账号目录。
+`~/` 与相对路径都以用户主目录为基准。桌面后台刷新已纳入这两个采集器；
+也可使用 `sync --auto --from-notify --background --source pi-desktop` 或
+将来源替换为 `claude-desktop` 单独采集。
+配置了云同步时，sync 命令仍可能上传汇总数据。
+修改源码不会自动更新已安装的软件，需要重新构建并安装包含新采集器的应用。
 
 ---
 

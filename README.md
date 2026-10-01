@@ -257,6 +257,8 @@ An Arch `PKGBUILD` for a local pacman install lives in `TokenTrackerLinux/packag
 | **Antigravity** | ✅ Auto | Passive transcript reader (`~/.gemini/{antigravity,antigravity-ide,antigravity-cli}/brain/**/transcript.jsonl`) |
 | **OmO** | ✅ Auto | Passive reader (`~/.omo/agent/sessions/**/*.jsonl`, subagent transcripts included). Same session format as oh-my-pi but a separate install root, cursor namespace and source label, so both can be tracked side by side. Reasoning tokens are reported as a subset of output (Codex convention) and are never billed twice |
 | **pi** (`@mariozechner/pi-coding-agent`) | ✅ Auto | Passive reader (`~/.pi/agent/sessions/**/*.jsonl`) |
+| **PI Desktop** (local fork) | ✅ Auto | Read-only `turns` counters from `~/.pi-desktop/pi.sqlite`; separate `pi-desktop` source, includes cached input without double-counting reasoning |
+| **Claude Desktop profiles** (local fork) | Conditional | Default Claude app profile and `~/.claudeN` profiles; reads only known `projects/` and `claude-code-sessions/` JSONL logs that contain explicit usage counters. Ordinary chat/Cowork without token logs is not measurable |
 | **Dots** | ✅ Auto | Routed through pi's provider split (`pi-dots` source, same passive reader) — no separate hook |
 | **Prime Agent** | ✅ Auto | Metadata-only passive usage reader (`~/.prime/agent/sessions/*.jsonl`; reads usage/model/provider/timestamp, never prompts or responses) |
 | **Craft Agents** | ✅ Auto | Passive session reader (`~/.craft-agent` + workspace session logs) |
@@ -413,6 +415,38 @@ TokenTracker scans `~/.codex` and `~/.claude` (plus `CODEX_HOME` / `CLAUDE_CONFI
 ```
 
 Each Codex root is expected to hold `sessions/` (and optionally `archived_sessions/`), each Claude root a `projects/` directory. Roots are de-duplicated by resolved path, so a profile whose `projects/` is a symlink to another profile's is read once. `tokentracker status` and `tokentracker doctor` list the extra roots and flag any that are missing.
+
+### Local fork: PI Desktop and isolated Claude app profiles
+
+PI Desktop is different from Pi CLI: its flat session logs do not supply the
+same usage format. This fork reads only the SQLite `turns` table's counters.
+Completed, aborted and failed turns with recorded usage count once; running
+turns are collected after completion. Repeated refreshes are idempotent, later
+counter corrections replace earlier values, and deleting application history
+does not erase previously collected usage. Cache reads are additional input;
+reasoning is already included in output. Costs remain model-price estimates,
+not a third-party provider's invoice. PI Desktop project attribution is not
+collected by this reader.
+
+The default Claude app profile and numbered `~/.claude1`, `~/.claude2`, etc.
+are discovered automatically. Only `projects/` and `claude-code-sessions/`
+are scanned, using the existing Claude usage parser and shared message dedup.
+There is no browser-cookie/login access, Cowork workspace scan, or conversion
+of plan quota percentages into token counts. If the app has no explicit token
+transcripts, `status --json` reports `token_logs_unavailable`, not measured zero.
+Desktop and CLI transcripts remain under the shared `claude` source to prevent
+double-counting copied sessions.
+
+Optional path overrides: `TOKENTRACKER_PI_DESKTOP_DB` points to a SQLite file;
+`TOKENTRACKER_CLAUDE_DESKTOP_HOME` points to one custom app profile. Paths beginning
+with `~/` and relative paths are anchored to the user home. Background app
+refreshes include these desktop collectors without scanning the whole Claude
+Code/Pi CLI history. For a targeted local scan, use
+`node bin/tracker.js sync --auto --from-notify --background --source pi-desktop` or
+`node bin/tracker.js sync --auto --from-notify --background --source claude-desktop`.
+As with other sync commands, configured cloud sync may upload aggregate rows.
+These source changes do not update an already-installed desktop app until a
+new app bundle containing this collector is built and installed.
 
 ## 🛠️ Development
 

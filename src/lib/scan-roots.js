@@ -32,6 +32,7 @@ const path = require("node:path");
 
 const { readJson } = require("./fs");
 const { resolveTrackerPaths } = require("./tracker-paths");
+const { discoverClaudeDesktopProfiles } = require("./claude-desktop");
 
 const PROVIDERS = Object.freeze({
   codex: Object.freeze({ envVar: "CODEX_HOME" }),
@@ -177,6 +178,11 @@ function resolveScanRoots({
     const envRoot = resolveEnvRoot(provider, { env, home });
     if (envRoot) candidates.push({ raw: envRoot, origin: "env" });
     for (const root of configured[provider]) candidates.push({ raw: root, origin: "config" });
+    if (provider === "claude") {
+      for (const root of discoverClaudeDesktopProfiles({ home, env, config, deps })) {
+        candidates.push({ raw: root, origin: "desktop" });
+      }
+    }
 
     const seen = new Set();
     const entries = [];
@@ -242,6 +248,7 @@ function hasAnyScanChild(root, children, deps = {}) {
 function describeScanRootOrigin(entry, provider) {
   if (!entry || entry.origin === "native") return "native";
   if (entry.origin === "env") return PROVIDERS[provider]?.envVar || "env";
+  if (entry.origin === "desktop") return "Claude Desktop";
   return "scanRoots";
 }
 

@@ -29,6 +29,7 @@ describe("formatProviderDisplayName", () => {
 
   it("gives Pi routed providers distinct readable names", () => {
     expect(formatProviderDisplayName("pi-anthropic")).toBe("Pi · Anthropic");
+    expect(formatProviderDisplayName("pi-desktop")).toBe("PI Desktop");
     expect(formatProviderDisplayName("PI-GITHUB-COPILOT")).toBe("Pi · GitHub Copilot");
   });
 

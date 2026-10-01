@@ -46,6 +46,7 @@ const {
   probeOpenclawSessionPluginState,
 } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const { discoverClaudeDesktopProfiles, claudeDesktopTranscriptDirs } = require("../lib/claude-desktop");
 const {
   resolveKimiWireFiles,
   resolveKimiCodeWireFiles,
@@ -66,6 +67,8 @@ const {
   resolveMinimaxCodeSessionsDir,
   resolvePiSessionFiles,
   resolvePiAgentDir,
+  resolvePiDesktopDbPath,
+  listClaudeProjectFiles,
   piAgentDirCollidesWithOmp,
   resolvePrimeAgentSessionFiles,
   resolvePrimeAgentDir,
@@ -515,6 +518,16 @@ async function cmdStatus(argv = []) {
   const piAgentDir = resolvePiAgentDir(process.env);
   const piInstalled = !piCollides && Boolean(piAgentDir) && fssync.existsSync(path.join(piAgentDir, "sessions"));
   const piFiles = piInstalled ? resolvePiSessionFiles(process.env) : [];
+  const piDesktopDb = resolvePiDesktopDbPath(process.env);
+  const piDesktopInstalled = fssync.existsSync(piDesktopDb);
+  const claudeDesktopProfiles = discoverClaudeDesktopProfiles({ home, env: process.env, config });
+  const claudeDesktopFiles = new Set();
+  for (const dir of claudeDesktopTranscriptDirs(claudeDesktopProfiles)) {
+    for (const file of await listClaudeProjectFiles(dir)) claudeDesktopFiles.add(file);
+  }
+  const claudeDesktopDetail = claudeDesktopFiles.size > 0
+    ? "known session transcripts detected; only explicit usage counters are collected"
+    : "profiles detected, but no readable token transcripts; chat/Cowork quota percentages are not tokens";
 
   // Prime Agent — passive scan only (no hooks).
   const primeAgentDir = resolvePrimeAgentDir(process.env);
@@ -1071,6 +1084,13 @@ async function cmdStatus(argv = []) {
         claude_code: claudeCodeInstalled
           ? { installed: true, detail: claudeCodeActive.join(" | ") }
           : { installed: false },
+        claude_desktop: claudeDesktopProfiles.length > 0
+          ? { installed: true, profiles: claudeDesktopProfiles.length,
+              files: claudeDesktopFiles.size,
+              collection_status: claudeDesktopFiles.size > 0
+                ? "transcripts_detected" : "token_logs_unavailable",
+              detail: claudeDesktopDetail }
+          : { installed: false },
         codebuddy: codebuddyInstalled
           ? { installed: true, files: codebuddyFiles.length }
           : { installed: false },
@@ -1093,6 +1113,9 @@ async function cmdStatus(argv = []) {
           : { installed: false },
         pi: piInstalled
           ? { installed: true, files: piFiles.length }
+          : { installed: false },
+        pi_desktop: piDesktopInstalled
+          ? { installed: true, detail: piDesktopDb, read_only: true }
           : { installed: false },
         prime_agent: primeAgentInstalled
           ? { installed: true, files: primeAgentFiles.length }
@@ -1286,6 +1309,10 @@ async function cmdStatus(argv = []) {
         : null,
       piInstalled
         ? `- pi: passive reader (${piFiles.length} session jsonl file${piFiles.length !== 1 ? "s" : ""} found)`
+        : null,
+      piDesktopInstalled ? `- PI Desktop: read-only turn usage reader (${piDesktopDb})` : null,
+      claudeDesktopProfiles.length > 0
+        ? `- Claude Desktop: ${claudeDesktopProfiles.length} profile(s); ${claudeDesktopDetail}`
         : null,
       primeAgentInstalled
         ? `- Prime Agent: passive reader (${primeAgentFiles.length} session jsonl file${primeAgentFiles.length !== 1 ? "s" : ""} found)`

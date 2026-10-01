@@ -9,6 +9,7 @@ const SPECIAL_PROVIDER_NAMES = {
   picopilot: "Pi · Copilot",
   dots: "Dots",
   pidots: "Pi · Dots",
+  pidesktop: "PI Desktop",
   lmstudio: "LM Studio",
   unsloth: "Unsloth Studio",
 };
