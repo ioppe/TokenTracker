@@ -91,4 +91,6 @@ test("nightly builds verify desktop snapshots and native reset isolation", () =>
   assert.match(content, /npm --prefix dashboard run typecheck/);
   assert.match(content, /-only-testing:TokenTrackerBarTests\/UsageLimitsRetentionTests/);
   assert.match(content, /-only-testing:TokenTrackerBarTests\/WeeklyLimitResetDetectorTests/);
+  assert.match(content, /test\/create-dmg-ci\.test\.js/);
+  assert.match(content, /::error title=DMG packaging failed::/);
 });

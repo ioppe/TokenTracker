@@ -4,7 +4,7 @@ set -euo pipefail
 # =============================================================================
 # create-dmg.sh — Create a professional DMG installer for TokenTracker
 # Usage: ./create-dmg.sh [path/to/TokenTracker.app]
-# Set CI=true to skip Finder/AppleScript customization (headless mode)
+# Set CI=true to delegate packaging and layout to Homebrew create-dmg.
 # =============================================================================
 
 APP_NAME="TokenTracker"
@@ -79,10 +79,47 @@ echo "==> Staging in $STAGING"
 # Copy app
 cp -a "$APP_PATH" "$STAGING/${APP_NAME}.app"
 
-# Create Applications symlink
-ln -s /Applications "$STAGING/Applications"
+# --- CI mode: let create-dmg manage image creation, layout and finalization.
+#     Its source argument must contain the .app, not be the .app itself. ---
+if [[ "${CI:-}" == "true" ]]; then
+    if ! command -v create-dmg >/dev/null 2>&1; then
+        echo "Error: CI mode requires the Homebrew 'create-dmg' tool."
+        echo "  brew install create-dmg"
+        exit 1
+    fi
 
-# Copy background into a hidden directory (so it's inside the DMG)
+    echo "==> CI mode: using Homebrew create-dmg for headless DMG layout"
+
+    DMG_ARGS=(
+        --volname "$VOLUME_NAME"
+        --format ULMO
+        --window-pos 200 120
+        --window-size "$WIN_W" "$WIN_H"
+        --icon-size "$ICON_SIZE"
+        --icon "${APP_NAME}.app" "$APP_X" "$APP_Y"
+        --app-drop-link "$APPS_X" "$APPS_Y"
+    )
+    if $HAS_BG; then
+        DMG_ARGS+=(--background "$BG_IMAGE")
+    fi
+    create-dmg "${DMG_ARGS[@]}" \
+        "$FINAL_DMG" \
+        "$STAGING"
+
+    FINAL_SIZE=$(du -sh "$FINAL_DMG" | cut -f1)
+    echo ""
+    echo "================================================"
+    echo "  DMG created successfully (CI path)!"
+    echo "  Output: $FINAL_DMG"
+    echo "  Size:   $FINAL_SIZE"
+    echo "================================================"
+    rm -f "$TEMP_DMG"
+    exit 0
+fi
+
+# The interactive path owns its link, background and temporary image; the CI
+# tool creates these itself, so do not put a duplicate link in its source.
+ln -s /Applications "$STAGING/Applications"
 if $HAS_BG; then
     mkdir -p "$STAGING/.background"
     cp "$BG_IMAGE" "$STAGING/.background/background.png"
@@ -103,51 +140,6 @@ hdiutil create \
     -format UDRW \
     -size "${DMG_SIZE_KB}k" \
     "$TEMP_DMG"
-
-# --- CI mode: bypass our hdiutil pipeline entirely and use the Homebrew
-#     `create-dmg` tool, which writes the .DS_Store directly (no Finder/AppleScript
-#     needed). This is the only way to get the background + icon layout on a
-#     headless macOS runner. ---
-if [[ "${CI:-}" == "true" ]]; then
-    if ! command -v create-dmg >/dev/null 2>&1; then
-        echo "Error: CI mode requires the Homebrew 'create-dmg' tool."
-        echo "  brew install create-dmg"
-        exit 1
-    fi
-
-    echo "==> CI mode: using Homebrew create-dmg for headless DMG layout"
-
-    BG_ARGS=()
-    if $HAS_BG; then
-        BG_ARGS=(--background "$BG_IMAGE")
-    fi
-
-    # The Homebrew create-dmg tool stages the .app, builds the DMG, applies
-    # background + icon positions, and finalizes — all without Finder.
-    # Note: it expects to create the OUTPUT file, so remove any leftover.
-    rm -f "$FINAL_DMG"
-    create-dmg \
-        --volname "$VOLUME_NAME" \
-        --format ULMO \
-        --window-pos 200 120 \
-        --window-size "$WIN_W" "$WIN_H" \
-        --icon-size "$ICON_SIZE" \
-        --icon "${APP_NAME}.app" "$APP_X" "$APP_Y" \
-        --app-drop-link "$APPS_X" "$APPS_Y" \
-        "${BG_ARGS[@]}" \
-        "$FINAL_DMG" \
-        "$APP_PATH"
-
-    FINAL_SIZE=$(du -sh "$FINAL_DMG" | cut -f1)
-    echo ""
-    echo "================================================"
-    echo "  DMG created successfully (CI path)!"
-    echo "  Output: $FINAL_DMG"
-    echo "  Size:   $FINAL_SIZE"
-    echo "================================================"
-    rm -f "$TEMP_DMG"
-    exit 0
-fi
 
 # --- Mount and customize ---
 echo "==> Mounting and customizing..."
