@@ -3,7 +3,9 @@ import { Clock as ClockIcon, Infinity as InfinityIcon } from "lucide-react";
 import { Card } from "../../components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy, getCopyLocale } from "../../../lib/copy";
-import { formatCompactNumber } from "../../../lib/format";
+import {
+  desktopAccountName, desktopTokenUsageText, hasDesktopQuota, hasDesktopTokenData,
+} from "../../../lib/claude-desktop-display.js";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
 import {
   LIMIT_PROVIDER_IDS,
@@ -631,61 +633,6 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
   );
 }
 
-function desktopAccountName(account) {
-  if (account.display_name) return account.display_name;
-  if (account.profile_id === "default") return copy("limits.claude_desktop.default_account");
-  if (account.profile_number != null) {
-    return copy("limits.claude_desktop.numbered_account", { number: account.profile_number });
-  }
-  return account.profile_name || copy("limits.claude_desktop.default_account");
-}
-
-function hasDesktopQuota(account) {
-  return account?.metric === "quota-percent" && Boolean(account.five_hour || account.seven_day);
-}
-
-function hasDesktopTokenData(account) {
-  return account?.metric === "token-usage"
-    || Boolean(account?.token_usage)
-    || account?.token_usage_status === "partial"
-    || account?.token_usage_status === "unavailable";
-}
-
-function formatApiEstimate(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return null;
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 4,
-    maximumFractionDigits: 6,
-  }).format(number);
-}
-
-function desktopTokenUsageText(account) {
-  if (account?.token_usage_status === "unavailable") {
-    return copy("limits.claude_desktop.token_usage_unavailable");
-  }
-  if (account?.token_usage_status === "partial" && !account?.token_usage) {
-    return copy("limits.claude_desktop.token_usage_partial");
-  }
-  const usage = account?.token_usage;
-  if (!usage) return null;
-  const formattedCost = usage.estimated_cost_usd == null
-    ? null : formatApiEstimate(usage.estimated_cost_usd);
-  const costSuffix = formattedCost
-    ? copy("limits.claude_desktop.token_usage_api_estimate", { cost: formattedCost })
-    : "";
-  const statusSuffix = account?.token_usage_status === "partial"
-    ? copy("limits.claude_desktop.token_usage_partial") : "";
-  return copy("limits.claude_desktop.token_usage", {
-    total: formatCompactNumber(usage.total_tokens),
-    input: formatCompactNumber(usage.input_tokens),
-    output: formatCompactNumber(usage.output_tokens),
-    cost_suffix: `${costSuffix}${statusSuffix}`,
-  });
-}
-
 // Provider row for states without usable limit data (not connected, inactive,
 // fetch error). A linked subscription still belongs to this row: it is
 // user-entered data, so its badge/progress stay visible regardless of the
@@ -1304,13 +1251,14 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
         const usageUnavailable = tokenStatus === "unavailable";
         const usagePartial = tokenStatus === "partial";
         const hasTokenStatus = usageObserved || usageUnavailable || usagePartial;
+        const hasQuota = hasDesktopQuota(account);
         const badge = <StatusBadge
-          label={hasTokenStatus
-            ? copy("limits.claude_desktop.token_usage_badge")
-            : copy("limits.claude_desktop.history")}
-          age={ago(account.token_usage_captured_at || account.cached_at)}
-          tone={usageObserved ? "cached" : hasTokenStatus || account.stale ? "stale" : "cached"}
-          tooltip={!hasTokenStatus && sampledAt
+          label={hasQuota ? copy("limits.claude_desktop.history")
+            : copy("limits.claude_desktop.token_usage_badge")}
+          age={ago(hasQuota ? account.cached_at : account.token_usage_captured_at)}
+          tone={hasQuota ? account.stale ? "stale" : "cached"
+            : usageObserved ? "cached" : hasTokenStatus ? "stale" : "cached"}
+          tooltip={hasQuota && sampledAt
             ? copy("limits.claude_desktop.sampled_at", { time: sampledAt }) : null}
         />;
         const tokenExtra = tokenText ? React.createElement(StatusLine, null, tokenText) : null;

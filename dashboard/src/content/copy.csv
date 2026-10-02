@@ -1508,6 +1508,9 @@ limits.claude_desktop.token_usage,limits,LimitsPage,UsageLimitsPanel,desktop_tok
 limits.claude_desktop.token_usage_api_estimate,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_api_estimate," | API est. {{cost}}",,active
 limits.claude_desktop.token_usage_partial,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_partial," | partial scan",,active
 limits.claude_desktop.token_usage_unavailable,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_unavailable,"Token usage unavailable",,active
+usage.claude_desktop.local_scope,ui,DashboardPage,ClaudeDesktopCollectionStatus,local_scope,"Claude Desktop local logs | all dates",,active
+usage.claude_desktop.quota_window,ui,DashboardPage,ClaudeDesktopCollectionStatus,quota_window,"{{window}} {{percent}}%",,active
+usage.claude_desktop.no_local_usage,ui,DashboardPage,ClaudeDesktopCollectionStatus,no_local_usage,"No readable local token usage records",,active
 limits.reauth.badge,limits,LimitsPage,UsageLimitsPanel,reauth_badge,"Re-auth",,active
 limits.reauth.tooltip,limits,LimitsPage,UsageLimitsPanel,reauth_tooltip,"Sign-in expired — run `{{command}}` in a terminal once to sign in again, then refresh.",,active
 shared.github.star,shared,*,GithubStar,star,"Star",,active

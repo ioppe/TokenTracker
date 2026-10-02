@@ -23,6 +23,7 @@ function AllToolsIcon({ size = 15, className = "" }) {
 }
 import { Popover } from "@base-ui/react/popover";
 import { Card, Button, Counter } from "../../components";
+import { ClaudeDesktopCollectionStatus } from "./ClaudeDesktopCollectionStatus.jsx";
 import { Select } from "../../components/Select.jsx";
 import { useTheme } from "../../../hooks/useTheme.js";
 import { useCurrency } from "../../../hooks/useCurrency.js";
@@ -213,6 +214,7 @@ export function UsageOverview({
   summaryCostValue,
   onCostInfo,
   fleetData = [],
+  desktopAccounts = [],
   onRefresh,
   loading,
   announceLoading = false,
@@ -520,6 +522,8 @@ export function UsageOverview({
             </div>
           ) : null}
         </div>
+
+        <ClaudeDesktopCollectionStatus accounts={desktopAccounts} />
 
         {/* Provider Distribution */}
         <div className={showProviderSkeleton ? undefined : "hidden"}>

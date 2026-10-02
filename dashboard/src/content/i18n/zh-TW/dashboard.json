@@ -1,4 +1,7 @@
 {
+  "usage.claude_desktop.local_scope": "Claude Desktop 本機日誌 | 全部時間",
+  "usage.claude_desktop.quota_window": "{{window}} {{percent}}%",
+  "usage.claude_desktop.no_local_usage": "沒有可讀取的本機 Token 用量紀錄",
   "usage.overview.all_tools": "全部",
   "usage.overview.all_models": "全部模型",
   "usage.overview.all_models_note": "同名模型會跨工具合併，並按總用量排序。",

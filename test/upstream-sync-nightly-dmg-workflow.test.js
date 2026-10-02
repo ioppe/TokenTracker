@@ -104,3 +104,14 @@ test("custom builds verify desktop snapshots and native reset isolation", () => 
   assert.match(content, /test\/create-dmg-ci\.test\.js/);
   assert.match(content, /::error title=DMG packaging failed::/);
 });
+
+test("custom packages stamp the fork update feed and publish a checksummed build manifest", () => {
+  const content = loadWorkflow();
+  const stamp = content.indexOf("name: Stamp and verify custom update channel");
+  assert.ok(stamp > 0 && stamp < content.indexOf("name: Ad-hoc sign app"));
+  assert.match(content, /custom-collectors-release\.cjs stamp/);
+  assert.match(content, /CUSTOM_SOURCE_SHA: \$\{\{ needs\.sync\.outputs\.head_sha \}\}/);
+  assert.match(content, /custom-collectors-release\.cjs manifest/);
+  assert.match(content, /gh release upload "\$tag" "\$asset" "\$manifest"/);
+  assert.match(content, /-only-testing:TokenTrackerBarTests\/UpdateChannelTests/);
+});

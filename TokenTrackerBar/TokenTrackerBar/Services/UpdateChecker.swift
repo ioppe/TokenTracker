@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 @MainActor
@@ -6,8 +7,8 @@ final class UpdateChecker {
 
     static let shared = UpdateChecker()
 
-    private let repo = "xiufengsun/TokenTracker"
-    private let releaseURL: String = "https://github.com/xiufengsun/TokenTracker/releases/latest"
+    private let channel = UpdateChannel(info: Bundle.main.infoDictionary ?? [:])
+    private var releaseURL: String { channel.releasePageURL }
 
     /// Observable status for menu item display
     private(set) var statusText: String? = nil {
@@ -91,6 +92,8 @@ final class UpdateChecker {
         let body: String?
         let html_url: String
         let assets: [Asset]
+        let draft: Bool?
+        var customManifest: CustomUpdateManifest?
 
         struct Asset: Decodable {
             let name: String
@@ -103,6 +106,9 @@ final class UpdateChecker {
         }
 
         var dmgAsset: Asset? {
+            if tag_name.hasSuffix("-\(UpdateChannel.customSuffix)") {
+                return assets.first { $0.name == "TokenTrackerBar-\(tagVersion).dmg" }
+            }
             let isArm64: Bool = {
                 var sysinfo = utsname()
                 uname(&sysinfo)
@@ -116,13 +122,15 @@ final class UpdateChecker {
             return assets.first { $0.name.hasSuffix(suffix) }
                 ?? assets.first { $0.name.hasSuffix(".dmg") }
         }
+
+        var updateIdentity: String {
+            guard let manifest = customManifest else { return tagVersion }
+            return "\(tagVersion)+\(manifest.build_number).\(manifest.build_attempt)"
+        }
     }
 
     nonisolated private func fetchLatestRelease() async throws -> GitHubRelease {
-        let urlString = "https://api.github.com/repos/\(repo)/releases/latest"
-        guard let url = URL(string: urlString) else { throw UpdateError.emptyResponse }
-
-        var request = URLRequest(url: url, timeoutInterval: 15)
+        var request = URLRequest(url: channel.apiURL, timeoutInterval: 15)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -130,7 +138,24 @@ final class UpdateChecker {
             throw UpdateError.curlFailed((response as? HTTPURLResponse)?.statusCode ?? -1)
         }
         guard !data.isEmpty else { throw UpdateError.emptyResponse }
-        return try JSONDecoder().decode(GitHubRelease.self, from: data)
+        let decoder = JSONDecoder()
+        if !channel.isCustom { return try decoder.decode(GitHubRelease.self, from: data) }
+        let releases = try decoder.decode([GitHubRelease].self, from: data)
+        guard var release = releases.filter({ $0.draft != true && channel.accepts(tag: $0.tag_name) })
+            .max(by: { UpdateChannel.compareVersions($0.tagVersion, $1.tagVersion) == .orderedAscending }),
+              let asset = release.assets.first(where: { $0.name == "custom-collectors.json" }),
+              let manifestURL = URL(string: asset.browser_download_url) else {
+            throw UpdateError.installFailed("Custom update manifest is missing; upstream updates are disabled for this channel")
+        }
+        let (manifestData, manifestResponse) = try await URLSession.shared.data(for: URLRequest(url: manifestURL, timeoutInterval: 15))
+        guard let http = manifestResponse as? HTTPURLResponse, http.statusCode == 200,
+              manifestData.count <= 16_384 else { throw UpdateError.emptyResponse }
+        let manifest = try decoder.decode(CustomUpdateManifest.self, from: manifestData)
+        guard channel.validates(manifest, tag: release.tag_name), release.dmgAsset != nil else {
+            throw UpdateError.installFailed("Custom update manifest does not match this channel")
+        }
+        release.customManifest = manifest
+        return release
     }
 
     // MARK: - Result Handling
@@ -139,21 +164,22 @@ final class UpdateChecker {
         switch result {
         case .success(let release):
             let current = currentVersion()
-            if compareVersions(current, release.tagVersion) == .orderedAscending {
+            if channel.shouldUpdate(current: current, target: release.tagVersion, manifest: release.customManifest) {
                 if silent, let dmg = release.dmgAsset {
                     // Loop guard: if we just silently installed this exact release but
                     // the app still reports itself as older, the downloaded DMG's
                     // Info.plist is out of sync with the git tag (issue #34 / 0.5.77).
                     // Reinstalling would copy the same broken DMG on every relaunch
                     // forever — skip instead and surface the problem via statusText.
-                    if isRecentlyInstalled(release.tagVersion) {
+                    if isRecentlyInstalled(release.updateIdentity) {
                         finishUpdate()
                         statusText = Strings.updateSkipped(target: release.tagVersion, current: current)
                         Swift.print("[UpdateChecker] Silent install loop averted: target=\(release.tagVersion), current=\(current)")
                         return
                     }
                     // Silent auto-update: download and install without prompting
-                    startDownloadAndInstall(dmg, targetVersion: release.tagVersion, interactive: false)
+                    startDownloadAndInstall(dmg, targetVersion: release.updateIdentity, interactive: false,
+                                            expectedChecksum: release.customManifest?.dmg_sha256)
                 } else {
                     promptUpdate(release: release, currentVersion: current)
                 }
@@ -186,20 +212,7 @@ final class UpdateChecker {
     // MARK: - Version
 
     func currentVersion() -> String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-    }
-
-    private func compareVersions(_ a: String, _ b: String) -> ComparisonResult {
-        let pa = a.split(separator: ".").compactMap { Int($0) }
-        let pb = b.split(separator: ".").compactMap { Int($0) }
-        let count = max(pa.count, pb.count)
-        for i in 0..<count {
-            let va = i < pa.count ? pa[i] : 0
-            let vb = i < pb.count ? pb[i] : 0
-            if va < vb { return .orderedAscending }
-            if va > vb { return .orderedDescending }
-        }
-        return .orderedSame
+        channel.displayVersion(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")
     }
 
     // MARK: - Loop Protection
@@ -254,7 +267,8 @@ final class UpdateChecker {
         presentAlert(alert) { response in
             if response == .alertFirstButtonReturn {
                 if let dmg = release.dmgAsset {
-                    self.startDownloadAndInstall(dmg, targetVersion: release.tagVersion, interactive: true)
+                    self.startDownloadAndInstall(dmg, targetVersion: release.updateIdentity, interactive: true,
+                                                 expectedChecksum: release.customManifest?.dmg_sha256)
                 } else if let url = URL(string: release.html_url) {
                     NSWorkspace.shared.open(url)
                 }
@@ -272,7 +286,8 @@ final class UpdateChecker {
 
     // MARK: - Download + Install (URLSession for proxy support)
 
-    private func startDownloadAndInstall(_ asset: GitHubRelease.Asset, targetVersion: String, interactive: Bool) {
+    private func startDownloadAndInstall(_ asset: GitHubRelease.Asset, targetVersion: String, interactive: Bool,
+                                        expectedChecksum: String? = nil) {
         isBusy = true
         let totalSize = Int64(asset.size)
         let totalMB = Double(totalSize) / 1_048_576
@@ -368,7 +383,7 @@ final class UpdateChecker {
                 case .success(let dmgURL):
                     self.statusText = Strings.installing
                     self.progressPanel?.setIndeterminate(detail: Strings.installing)
-                    self.performInstallAsync(dmgURL, targetVersion: targetVersion)
+                    self.performInstallAsync(dmgURL, targetVersion: targetVersion, expectedChecksum: expectedChecksum)
                 case .failure(let error):
                     self.finishUpdate()
                     self.showAlert(
@@ -385,11 +400,24 @@ final class UpdateChecker {
         delegate.start(url: url)
     }
 
-    private func performInstallAsync(_ dmgURL: URL, targetVersion: String) {
+    private func performInstallAsync(_ dmgURL: URL, targetVersion: String, expectedChecksum: String?) {
         let dmgPath = dmgURL.path
         Task.detached { [self] in
             let result: Result<URL, Error>
             do {
+                if let expectedChecksum {
+                    let file = try FileHandle(forReadingFrom: dmgURL)
+                    defer { try? file.close() }
+                    var hash = SHA256()
+                    while let chunk = try file.read(upToCount: 1_048_576), !chunk.isEmpty {
+                        hash.update(data: chunk)
+                    }
+                    let actual = hash.finalize().map { String(format: "%02x", $0) }.joined()
+                    if actual != expectedChecksum {
+                        try? FileManager.default.removeItem(at: dmgURL)
+                        throw UpdateError.installFailed("Custom DMG checksum mismatch; check for updates again")
+                    }
+                }
                 result = .success(try self.mountCopyRelaunch(dmgPath: dmgPath))
             } catch {
                 result = .failure(error)

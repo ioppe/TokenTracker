@@ -260,6 +260,20 @@ test("desktop usage cache reuses unchanged files and reads appended records incr
   assert.equal(third.token_usage.total_tokens, 36);
 });
 
+test("quota-only desktop accounts expose unavailable tokens even without any JSONL files", async (t) => {
+  const f = fixture(t);
+  f.write(f.root, history(sample({ fh: 12, sd: 30 })));
+  const [account] = await readClaudeDesktopUsageLimits(f.options);
+  assert.equal(account.configured, true);
+  assert.equal(account.token_usage_status, "unavailable");
+  assert.equal(account.token_usage_unavailable_reason, "no-local-usage-files");
+  assert.equal(account.token_usage_files, 0);
+  assert.equal(account.token_usage, null);
+  assert.equal(account.token_usage_captured_at, null);
+  assert.equal(account.five_hour.utilization, 12);
+  assert.ok(!JSON.stringify(account).includes("estimated_cost_usd"));
+});
+
 test("desktop accounts expose unavailable usage when Agent files have no usage fields", async (t) => {
   const f = fixture(t);
   f.write(f.root, history(sample({ fh: 12, sd: 30 })));

@@ -895,22 +895,24 @@ async function readClaudeDesktopUsageLimits({
     const tokenUsageStatus = tokenUsage.token_usage
       ? tokenUsage.truncated ? "partial" : "observed"
       : tokenUsage.truncated ? "partial" : "unavailable";
-    const tokenFields = tokenUsage.detected ? {
+    const tokenFields = {
       token_usage_status: tokenUsageStatus,
+      token_usage_unavailable_reason: tokenUsage.token_usage ? null
+        : tokenUsage.session_files === 0 ? "no-local-usage-files" : "no-usage-counters",
       token_usage_source: TOKEN_USAGE_SOURCE,
       token_usage_files: tokenUsage.session_files,
       token_usage_truncated: tokenUsage.truncated,
-      token_usage_captured_at: tokenUsage.captured_at,
+      token_usage_captured_at: tokenUsage.detected ? tokenUsage.captured_at : null,
       token_usage: tokenUsage.token_usage,
       token_usage_provenance: {
         source: TOKEN_USAGE_SOURCE,
         confidence: tokenUsageStatus,
-        captured_at: tokenUsage.captured_at,
+        captured_at: tokenUsage.detected ? tokenUsage.captured_at : null,
         session_files: tokenUsage.session_files,
         scan_stats: tokenUsage.scan_stats,
         aggregation: tokenUsage.token_usage?.aggregation || null,
       },
-    } : {};
+    };
     const base = limits || {
       configured: true,
       source: TOKEN_USAGE_SOURCE,
