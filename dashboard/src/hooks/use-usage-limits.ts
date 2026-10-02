@@ -85,9 +85,21 @@ type ClaudeDesktopTokenUsage = {
   readonly output_tokens: number;
   readonly total_tokens: number;
   readonly messages: number;
+  readonly observed_events?: number;
   readonly models?: readonly ClaudeDesktopTokenUsageModel[];
   readonly estimated_cost_usd: number | null;
   readonly estimated_cost_status: "complete" | "partial" | "unavailable";
+  readonly aggregation?: {
+    readonly mode: "per-event" | "cumulative-delta" | "mixed" | "ambiguous";
+    readonly confidence: "observed" | "ambiguous";
+    readonly sessions: number;
+    readonly observed_events: number;
+    readonly cumulative_snapshots: number;
+    readonly cumulative_events_counted: number;
+    readonly cumulative_unchanged: number;
+    readonly cumulative_resets: number;
+    readonly ambiguous_events: number;
+  };
   readonly scan_stats?: {
     readonly files_discovered: number;
     readonly files_scanned: number;
@@ -127,6 +139,7 @@ type ClaudeDesktopAccount = {
     readonly captured_at?: string;
     readonly session_files?: number;
     readonly scan_stats?: ClaudeDesktopTokenUsage["scan_stats"];
+    readonly aggregation?: ClaudeDesktopTokenUsage["aggregation"];
   };
 };
 

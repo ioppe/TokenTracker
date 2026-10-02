@@ -16,12 +16,15 @@ const AGENT_JSONL_MAX_BYTES = 16 * 1024 * 1024;
 const AGENT_MAX_FILES = 600;
 const AGENT_MAX_DEPTH = 16;
 const AGENT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
-const AGENT_USAGE_CACHE_VERSION = 1;
+const AGENT_USAGE_CACHE_VERSION = 2;
 const AGENT_USAGE_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const AGENT_USAGE_CACHE_DIR = "claude-desktop-usage";
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const TOKEN_USAGE_SOURCE = "local-agent-session";
+const USAGE_SCOPE_PER_EVENT = "per-event";
+const USAGE_SCOPE_CUMULATIVE = "cumulative";
+const USAGE_SCOPE_AMBIGUOUS = "ambiguous";
 const TOKEN_FIELDS = [
   "input_tokens",
   "cache_read_input_tokens",
@@ -172,16 +175,107 @@ function firstText(...values) {
   return values.find((value) => typeof value === "string" && value.trim())?.trim() || null;
 }
 
+function firstObject(...values) {
+  return values.find((value) => value && typeof value === "object" && !Array.isArray(value)) || null;
+}
+
+function usageScopeMarker(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") {
+      if (value) return USAGE_SCOPE_CUMULATIVE;
+      continue;
+    }
+    if (typeof value !== "string") continue;
+    const marker = value.trim().toLowerCase();
+    if (!marker) continue;
+    if (marker.includes("cumulative") || marker.includes("session") || marker === "total") {
+      return USAGE_SCOPE_CUMULATIVE;
+    }
+    if (marker.includes("delta") || marker.includes("turn") || marker.includes("request")) {
+      return USAGE_SCOPE_PER_EVENT;
+    }
+  }
+  return null;
+}
+
+function inferUsageScope(usage, ...records) {
+  const usageMarker = usageScopeMarker(
+    usage?.scope,
+    usage?.kind,
+    usage?.type,
+    usage?.usage_type,
+    usage?.usageType,
+    usage?.cumulative,
+    usage?.is_cumulative,
+    usage?.isCumulative,
+  );
+  if (usageMarker) return usageMarker;
+  const recordMarker = usageScopeMarker(...records.flatMap((record) => [
+    record?.usage_scope,
+    record?.usageScope,
+    record?.usage_type,
+    record?.usageType,
+    record?.scope,
+    record?.kind,
+    record?.type,
+    record?.cumulative,
+    record?.is_cumulative,
+    record?.isCumulative,
+  ]));
+  return recordMarker || USAGE_SCOPE_PER_EVENT;
+}
+
 function usageEventParts(record) {
   const message = record?.message && typeof record.message === "object" ? record.message : null;
   const event = record?.event && typeof record.event === "object" ? record.event : null;
   const eventMessage = event?.message && typeof event.message === "object" ? event.message : null;
-  const usage = message?.usage || record?.usage || eventMessage?.usage || event?.usage;
-  const model = firstText(message?.model, record?.model, eventMessage?.model, event?.model) || "unknown";
-  const messageId = firstText(message?.id, record?.message_id, eventMessage?.id, event?.message_id);
+  const payload = event?.payload && typeof event.payload === "object" ? event.payload : null;
+  const cumulativeUsage = firstObject(
+    record?.cumulative_usage,
+    record?.cumulativeUsage,
+    record?.session_usage,
+    record?.sessionUsage,
+    record?.total_usage,
+    record?.totalUsage,
+    message?.cumulative_usage,
+    message?.cumulativeUsage,
+    eventMessage?.cumulative_usage,
+    eventMessage?.cumulativeUsage,
+    event?.cumulative_usage,
+    event?.cumulativeUsage,
+    payload?.cumulative_usage,
+    payload?.cumulativeUsage,
+  );
+  const regularUsage = firstObject(
+    message?.usage,
+    record?.usage,
+    eventMessage?.usage,
+    event?.usage,
+    payload?.usage,
+  );
+  const usage = cumulativeUsage || regularUsage;
+  const model = firstText(
+    message?.model,
+    record?.model,
+    eventMessage?.model,
+    event?.model,
+    payload?.model,
+  ) || "unknown";
+  const messageId = firstText(
+    message?.id,
+    record?.message_id,
+    record?.messageId,
+    eventMessage?.id,
+    event?.message_id,
+    event?.messageId,
+    payload?.message_id,
+    payload?.messageId,
+  );
   const requestId = firstText(record?.requestId, record?.request_id, event?.requestId, event?.request_id);
   const fallbackId = firstText(record?.uuid, event?.uuid, record?.id, event?.id);
   const sessionId = firstText(
+    message?.session_id,
+    message?.sessionId,
     record?.session_id,
     record?.sessionId,
     record?.conversation_id,
@@ -194,8 +288,24 @@ function usageEventParts(record) {
     event?.conversationId,
     event?.thread_id,
     event?.threadId,
+    payload?.session_id,
+    payload?.sessionId,
+    payload?.conversation_id,
+    payload?.conversationId,
   );
-  return { usage, model, messageId, requestId, fallbackId, sessionId, event };
+  const usageScope = cumulativeUsage
+    ? USAGE_SCOPE_CUMULATIVE
+    : inferUsageScope(regularUsage, record, event, eventMessage, payload);
+  return {
+    usage,
+    usageScope,
+    model,
+    messageId,
+    requestId,
+    fallbackId,
+    sessionId: sessionId ? eventIdentityDigest(`session:${sessionId}`) : null,
+    event,
+  };
 }
 
 function usageEventIdentity(parts, usage, timestampMs) {
@@ -210,6 +320,7 @@ function usageEventIdentity(parts, usage, timestampMs) {
     "fingerprint",
     parts.sessionId || "",
     parts.model,
+    parts.usageScope || USAGE_SCOPE_PER_EVENT,
     timestampMs,
     usageKey,
   ].join(":");
@@ -221,8 +332,14 @@ function eventIdentityDigest(identity) {
 
 function chooseUsageEvent(previous, candidate) {
   if (!previous) return candidate;
-  if (candidate.usage.total_tokens > previous.usage.total_tokens) return candidate;
-  if (candidate.usage.total_tokens === previous.usage.total_tokens
+  const previousScope = previous.usageScope === USAGE_SCOPE_CUMULATIVE ? 1 : 0;
+  const candidateScope = candidate.usageScope === USAGE_SCOPE_CUMULATIVE ? 1 : 0;
+  if (candidateScope !== previousScope) return candidateScope > previousScope ? candidate : previous;
+  if (candidate.usage.output_tokens > previous.usage.output_tokens) return candidate;
+  if (candidate.usage.output_tokens === previous.usage.output_tokens
+    && candidate.usage.total_tokens > previous.usage.total_tokens) return candidate;
+  if (candidate.usage.output_tokens === previous.usage.output_tokens
+    && candidate.usage.total_tokens === previous.usage.total_tokens
     && candidate.timestampMs >= previous.timestampMs) return candidate;
   return previous;
 }
@@ -316,10 +433,109 @@ function estimateClaudeDesktopCost(model, totals) {
   });
 }
 
+function diffUsage(current, previous) {
+  const reset = Boolean(previous && TOKEN_FIELDS
+    .filter((key) => key !== "total_tokens")
+    .some((key) => current[key] < previous[key]));
+  const delta = emptyUsageTotals();
+  for (const key of TOKEN_FIELDS) {
+    if (key === "total_tokens") continue;
+    delta[key] = !previous || reset ? current[key] : Math.max(0, current[key] - previous[key]);
+  }
+  delta.total_tokens = TOKEN_FIELDS
+    .filter((key) => key !== "total_tokens")
+    .reduce((sum, key) => sum + delta[key], 0);
+  return { delta, reset };
+}
+
+function aggregateSessionUsage(events) {
+  const ordered = [...events].sort(
+    (a, b) => a.timestampMs - b.timestampMs || a.identity.localeCompare(b.identity, "en"),
+  );
+  const effectiveEvents = [];
+  const cumulativeGroups = new Map();
+  const sessionIds = new Set();
+  let cumulativeSnapshots = 0;
+  let cumulativeEventsCounted = 0;
+  let cumulativeUnchanged = 0;
+  let cumulativeResets = 0;
+  let ambiguousEvents = 0;
+
+  for (const event of ordered) {
+    if (event.sessionId) sessionIds.add(event.sessionId);
+    if (event.usageScope !== USAGE_SCOPE_CUMULATIVE) {
+      effectiveEvents.push(event);
+      continue;
+    }
+    cumulativeSnapshots += 1;
+    if (!event.sessionId) {
+      // An explicit cumulative snapshot without a session key cannot be
+      // safely differenced across files. Keep the observation visible, but
+      // mark the aggregation ambiguous instead of silently treating it as a
+      // turn delta.
+      ambiguousEvents += 1;
+      effectiveEvents.push({ ...event, usageScope: USAGE_SCOPE_AMBIGUOUS });
+      continue;
+    }
+    const key = `${event.sessionId}\u0000${event.model}`;
+    const group = cumulativeGroups.get(key) || [];
+    group.push(event);
+    cumulativeGroups.set(key, group);
+  }
+
+  for (const group of cumulativeGroups.values()) {
+    let previous = null;
+    for (const event of group) {
+      const { delta, reset } = diffUsage(event.usage, previous);
+      if (reset) cumulativeResets += 1;
+      previous = event.usage;
+      if (delta.total_tokens <= 0) {
+        cumulativeUnchanged += 1;
+        continue;
+      }
+      cumulativeEventsCounted += 1;
+      effectiveEvents.push({
+        ...event,
+        usage: delta,
+        usageScope: "cumulative-delta",
+      });
+    }
+  }
+
+  effectiveEvents.sort(
+    (a, b) => a.timestampMs - b.timestampMs || a.identity.localeCompare(b.identity, "en"),
+  );
+  const hasCumulative = cumulativeSnapshots > 0;
+  const hasPerEvent = ordered.some((event) => event.usageScope !== USAGE_SCOPE_CUMULATIVE);
+  const mode = ambiguousEvents > 0
+    ? USAGE_SCOPE_AMBIGUOUS
+    : hasCumulative && hasPerEvent
+      ? "mixed"
+      : hasCumulative
+        ? "cumulative-delta"
+        : USAGE_SCOPE_PER_EVENT;
+  return {
+    events: effectiveEvents,
+    diagnostics: {
+      mode,
+      confidence: ambiguousEvents > 0 ? USAGE_SCOPE_AMBIGUOUS : "observed",
+      sessions: sessionIds.size,
+      observed_events: ordered.length,
+      cumulative_snapshots: cumulativeSnapshots,
+      cumulative_events_counted: cumulativeEventsCounted,
+      cumulative_unchanged: cumulativeUnchanged,
+      cumulative_resets: cumulativeResets,
+      ambiguous_events: ambiguousEvents,
+    },
+  };
+}
+
 function buildTokenUsage(events, scanStats = null) {
+  const aggregation = aggregateSessionUsage(events);
+  const effectiveEvents = aggregation.events;
   const totals = emptyUsageTotals();
   const byModel = new Map();
-  for (const event of events) {
+  for (const event of effectiveEvents) {
     addUsageTotals(totals, event.usage);
     const current = byModel.get(event.model) || emptyUsageTotals();
     addUsageTotals(current, event.usage);
@@ -339,12 +555,14 @@ function buildTokenUsage(events, scanStats = null) {
     : null;
   return {
     ...totals,
-    messages: events.length,
+    messages: effectiveEvents.length,
+    observed_events: events.length,
     models,
     estimated_cost_usd: estimatedCost,
     estimated_cost_status: priced.length === 0
       ? "unavailable"
       : priced.length === models.length ? "complete" : "partial",
+    aggregation: aggregation.diagnostics,
     ...(scanStats ? { scan_stats: scanStats } : {}),
   };
 }
@@ -380,12 +598,19 @@ function cacheEntryEvents(entry) {
     if (!value || typeof value !== "object" || typeof value.identity !== "string") continue;
     const usage = normalizeClaudeDesktopUsage(value.usage);
     if (!usage || typeof value.model !== "string" || !Number.isFinite(value.timestampMs)) continue;
-    events.set(value.identity, {
+    const candidate = {
       identity: value.identity,
       model: value.model,
       usage,
       timestampMs: value.timestampMs,
-    });
+      sessionId: typeof value.sessionId === "string" ? value.sessionId : null,
+      usageScope: value.usageScope === USAGE_SCOPE_CUMULATIVE
+        ? USAGE_SCOPE_CUMULATIVE
+        : value.usageScope === USAGE_SCOPE_AMBIGUOUS
+          ? USAGE_SCOPE_AMBIGUOUS
+          : USAGE_SCOPE_PER_EVENT,
+    };
+    events.set(value.identity, chooseUsageEvent(events.get(value.identity), candidate));
   }
   return events;
 }
@@ -432,6 +657,8 @@ function parseAgentUsageBuffer(raw, {
           model: parts.model,
           usage,
           timestampMs,
+          sessionId: parts.sessionId,
+          usageScope: parts.usageScope,
         };
         const previous = events.get(identity);
         const selected = chooseUsageEvent(previous, candidate);
@@ -681,6 +908,7 @@ async function readClaudeDesktopUsageLimits({
         captured_at: tokenUsage.captured_at,
         session_files: tokenUsage.session_files,
         scan_stats: tokenUsage.scan_stats,
+        aggregation: tokenUsage.token_usage?.aggregation || null,
       },
     } : {};
     const base = limits || {

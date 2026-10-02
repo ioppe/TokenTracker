@@ -131,6 +131,100 @@ test("desktop Agent/Cowork JSONL usage is deduplicated without returning message
   assert.ok(!JSON.stringify(result).includes("PRIVATE RESPONSE"));
 });
 
+test("desktop usage keeps the final streaming snapshot for one assistant message", async (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, "claude-code-sessions", "streaming.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const records = [
+    { type: "assistant", timestamp: "2026-10-02T11:00:00Z", session_id: "stream-session",
+      message: { id: "stream-message", model: "claude-sonnet-4", usage: { input_tokens: 100, output_tokens: 1 } } },
+    { type: "assistant", timestamp: "2026-10-02T11:00:01Z", session_id: "stream-session",
+      message: { id: "stream-message", model: "claude-sonnet-4", usage: { input_tokens: 100, output_tokens: 9 } } },
+  ];
+  fs.writeFileSync(file, `${records.map(JSON.stringify).join("\n")}\n`);
+
+  const result = await readClaudeDesktopAgentUsage(f.root, { nowMs });
+  assert.equal(result.usage_events, 1);
+  assert.equal(result.token_usage.input_tokens, 100);
+  assert.equal(result.token_usage.output_tokens, 9);
+  assert.equal(result.token_usage.total_tokens, 109);
+  assert.equal(result.token_usage.aggregation.mode, "per-event");
+  assert.equal(result.token_usage.scan_stats.usage_events_deduplicated, 1);
+  assert.ok(!JSON.stringify(result).includes("stream-session"));
+});
+
+test("desktop usage converts explicit cumulative session snapshots into deltas", async (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, "claude-code-sessions", "cumulative.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const records = [
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:00:00Z", session_id: "cumulative-session",
+      model: "claude-sonnet-4", session_usage: { input_tokens: 10, output_tokens: 2 } },
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:01:00Z", session_id: "cumulative-session",
+      model: "claude-sonnet-4", session_usage: { input_tokens: 30, output_tokens: 5 } },
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:02:00Z", session_id: "cumulative-session",
+      model: "claude-sonnet-4", session_usage: { input_tokens: 30, output_tokens: 5 } },
+  ];
+  fs.writeFileSync(file, `${records.map(JSON.stringify).join("\n")}\n`);
+
+  const result = await readClaudeDesktopAgentUsage(f.root, { nowMs });
+  assert.equal(result.token_usage.input_tokens, 30);
+  assert.equal(result.token_usage.output_tokens, 5);
+  assert.equal(result.token_usage.total_tokens, 35);
+  assert.equal(result.token_usage.messages, 2);
+  assert.equal(result.token_usage.observed_events, 3);
+  assert.deepEqual(result.token_usage.aggregation, {
+    mode: "cumulative-delta",
+    confidence: "observed",
+    sessions: 1,
+    observed_events: 3,
+    cumulative_snapshots: 3,
+    cumulative_events_counted: 2,
+    cumulative_unchanged: 1,
+    cumulative_resets: 0,
+    ambiguous_events: 0,
+  });
+});
+
+test("desktop usage treats a lower cumulative snapshot as a session reset", async (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, "claude-code-sessions", "reset.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const records = [
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:00:00Z", session_id: "reset-session",
+      model: "claude-sonnet-4", session_usage: { input_tokens: 20, output_tokens: 5 } },
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:01:00Z", session_id: "reset-session",
+      model: "claude-sonnet-4", session_usage: { input_tokens: 3, output_tokens: 1 } },
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:02:00Z", session_id: "reset-session",
+      model: "claude-sonnet-4", session_usage: { input_tokens: 4, output_tokens: 2 } },
+  ];
+  fs.writeFileSync(file, `${records.map(JSON.stringify).join("\n")}\n`);
+
+  const result = await readClaudeDesktopAgentUsage(f.root, { nowMs });
+  assert.equal(result.token_usage.total_tokens, 31);
+  assert.equal(result.token_usage.aggregation.cumulative_resets, 1);
+  assert.equal(result.token_usage.aggregation.cumulative_events_counted, 3);
+});
+
+test("desktop usage marks cumulative snapshots without a session key ambiguous", async (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, "claude-code-sessions", "ambiguous.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const records = [
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:00:00Z", model: "claude-sonnet-4",
+      session_usage: { input_tokens: 10, output_tokens: 1 } },
+    { type: "usage_snapshot", timestamp: "2026-10-02T11:01:00Z", model: "claude-sonnet-4",
+      session_usage: { input_tokens: 15, output_tokens: 2 } },
+  ];
+  fs.writeFileSync(file, `${records.map(JSON.stringify).join("\n")}\n`);
+
+  const result = await readClaudeDesktopAgentUsage(f.root, { nowMs });
+  assert.equal(result.token_usage.total_tokens, 28);
+  assert.equal(result.token_usage.aggregation.mode, "ambiguous");
+  assert.equal(result.token_usage.aggregation.confidence, "ambiguous");
+  assert.equal(result.token_usage.aggregation.ambiguous_events, 2);
+});
+
 test("desktop usage cache reuses unchanged files and reads appended records incrementally", async (t) => {
   const f = fixture(t);
   const file = path.join(f.root, "claude-code-sessions", "incremental.jsonl");
