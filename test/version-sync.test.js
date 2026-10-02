@@ -8,12 +8,14 @@ const {
   readCanonicalVersion,
   collectVersionEntries,
   syncVersions,
+  syncCanonicalVersion,
   findVersionMismatches,
 } = require('../scripts/version-files.cjs');
 
 function writeFixture(root, canonical = '2.3.4', stale = '0.0.1') {
   const files = {
     'package.json': JSON.stringify({ name: 'tokentracker-cli', version: canonical }, null, 2),
+    'package-lock.json': JSON.stringify({ name: 'tokentracker-cli', version: stale, lockfileVersion: 3, packages: { '': { name: 'tokentracker-cli', version: stale }, 'node_modules/example': { version: stale } } }, null, 2),
     'TokenTrackerBar/project.yml': [
       'MARKETING_VERSION: "' + stale + '"',
       'MARKETING_VERSION: "' + stale + '"',
@@ -53,6 +55,39 @@ test('syncVersions updates every managed platform version from the root package 
   assert.match(fs.readFileSync(path.join(root, 'TokenTrackerLinux/src-tauri/Cargo.lock'), 'utf8'), /name = "other"\nversion = "0\.0\.1"/);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'TokenTrackerLinux/package-lock.json'), 'utf8')).version, version);
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'TokenTrackerLinux/package-lock.json'), 'utf8')).packages['node_modules/example'].version, '0.0.1');
+});
+
+test('syncCanonicalVersion aligns the root package, lockfile, and every platform version', (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const changed = syncCanonicalVersion(root, '2.3.4');
+
+  assert.deepEqual(findVersionMismatches(root, '2.3.4'), []);
+  assert.deepEqual(changed, [
+    'package.json',
+    'package-lock.json',
+    'TokenTrackerBar/project.yml',
+    'TokenTrackerWin/TokenTrackerWin.csproj',
+    'TokenTrackerLinux/package.json',
+    'TokenTrackerLinux/package-lock.json',
+    'TokenTrackerLinux/src-tauri/Cargo.toml',
+    'TokenTrackerLinux/src-tauri/Cargo.lock',
+    'TokenTrackerLinux/src-tauri/tauri.conf.json',
+    'TokenTrackerLinux/packaging/arch/tokentracker-linux/PKGBUILD',
+  ]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version, '2.3.4');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8')).version, '2.3.4');
+});
+
+test('syncCanonicalVersion rejects channel suffixes as platform versions', (t) => {
+  const root = fixture();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  assert.throws(
+    () => syncCanonicalVersion(root, '2.3.4-custom-collectors'),
+    /stable x\.y\.z version/,
+  );
 });
 
 test('collectVersionEntries rejects duplicate PKGBUILD pkgver entries', (t) => {

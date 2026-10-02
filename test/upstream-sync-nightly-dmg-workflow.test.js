@@ -15,11 +15,11 @@ function loadWorkflow() {
   return fs.readFileSync(WORKFLOW_PATH, "utf8");
 }
 
-test("nightly workflow file exists", () => {
+test("custom collectors workflow file exists", () => {
   assert.ok(fs.existsSync(WORKFLOW_PATH));
 });
 
-test("nightly workflow supports scheduled and manual upstream sync", () => {
+test("custom collectors workflow supports scheduled and manual upstream sync", () => {
   const content = loadWorkflow();
   assert.match(content, /schedule:/);
   assert.match(content, /cron:\s*["']15 3 \* \* \*["']/);
@@ -28,6 +28,8 @@ test("nightly workflow supports scheduled and manual upstream sync", () => {
   assert.match(content, /git remote add upstream/);
   assert.match(content, /git fetch --no-tags --prune upstream/);
   assert.match(content, /git merge --no-edit "upstream\/\$\{UPSTREAM_REF\}"/);
+  assert.match(content, /node scripts\/align-release-version\.cjs "\$\{upstream_version\}"/);
+  assert.match(content, /CUSTOM_CHANNEL_SUFFIX: custom-collectors/);
 });
 
 test("upstream conflicts stop before pushing the fork branch", () => {
@@ -38,7 +40,7 @@ test("upstream conflicts stop before pushing the fork branch", () => {
   assert.match(content, /git push origin "HEAD:\$\{TARGET_BRANCH\}"/);
 });
 
-test("nightly workflow builds a macOS DMG and publishes a rolling release", () => {
+test("custom collectors workflow builds a macOS DMG and publishes a versioned prerelease", () => {
   const content = loadWorkflow();
   assert.match(content, /runs-on:\s*macos-26/);
   assert.match(content, /npm run dashboard:build/);
@@ -49,8 +51,13 @@ test("nightly workflow builds a macOS DMG and publishes a rolling release", () =
   assert.match(content, /actions\/upload-artifact@v4/);
   assert.match(content, /actions\/download-artifact@v4/);
   assert.match(content, /retention-days:\s*14/);
-  assert.match(content, /publish-nightly:/);
-  assert.match(content, /tag="nightly"/);
+  assert.match(content, /publish-custom-collectors:/);
+  assert.match(content, /release_tag: \$\{\{ steps\.merge\.outputs\.release_tag \}\}/);
+  assert.match(content, /channel_version: \$\{\{ steps\.merge\.outputs\.channel_version \}\}/);
+  assert.match(content, /tag="\$RELEASE_TAG"/);
+  assert.match(content, /release_tag="v\$\{channel_version\}"/);
+  assert.match(content, /TokenTrackerBar-\$\{\{ needs\.sync\.outputs\.channel_version \}\}\.dmg/);
+  assert.match(content, /asset="release-assets\/TokenTrackerBar-\$\{CHANNEL_VERSION\}\.dmg"/);
   assert.match(content, /gh release create/);
   assert.match(content, /gh release upload/);
   assert.match(content, /--clobber/);
@@ -62,7 +69,7 @@ test("scheduled runs skip redundant builds while manual runs can rebuild", () =>
   const content = loadWorkflow();
   assert.match(
     content,
-    /github\.event_name == 'workflow_dispatch' \|\| needs\.sync\.outputs\.changed == 'true'/
+    /github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch' \|\| needs\.sync\.outputs\.changed == 'true'/
   );
 });
 
@@ -83,7 +90,7 @@ test("custom collector pushes build artifacts without merging or publishing", ()
   assert.match(content, /if: \$\{\{ github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'/);
 });
 
-test("nightly builds verify desktop snapshots and native reset isolation", () => {
+test("custom builds verify desktop snapshots and native reset isolation", () => {
   const content = loadWorkflow();
   assert.match(content, /node-version: 24/);
   assert.match(content, /node --test test\/claude-desktop-limits\.test\.js/);

@@ -181,6 +181,37 @@ function syncVersions(root, version) {
   return changed;
 }
 
+function syncCanonicalVersion(root, version) {
+  assertReleaseVersion(version);
+  const changed = [];
+
+  const packageFile = VERSION_FILES[0];
+  const packagePath = path.join(root, packageFile.label);
+  const packageContent = fs.readFileSync(packagePath, 'utf8');
+  const packageUpdated = packageFile.write(packageContent, version);
+  if (packageUpdated !== packageContent) {
+    fs.writeFileSync(packagePath, packageUpdated, 'utf8');
+    changed.push(packageFile.label);
+  }
+
+  const lockLabel = 'package-lock.json';
+  const lockPath = path.join(root, lockLabel);
+  const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+  if (!lock.packages || !lock.packages['']) {
+    throw new Error('Missing root package entry in package-lock.json');
+  }
+  lock.version = version;
+  lock.packages[''].version = version;
+  const lockUpdated = `${JSON.stringify(lock, null, 2)}\n`;
+  const lockContent = fs.readFileSync(lockPath, 'utf8');
+  if (lockUpdated !== lockContent) {
+    fs.writeFileSync(lockPath, lockUpdated, 'utf8');
+    changed.push(lockLabel);
+  }
+
+  return changed.concat(syncVersions(root, version));
+}
+
 function findVersionMismatches(root, version) {
   return collectVersionEntries(root)
     .filter((entry) => entry.version !== version)
@@ -192,5 +223,6 @@ module.exports = {
   readCanonicalVersion,
   collectVersionEntries,
   syncVersions,
+  syncCanonicalVersion,
   findVersionMismatches,
 };
