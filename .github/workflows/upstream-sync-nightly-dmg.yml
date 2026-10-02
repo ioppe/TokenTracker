@@ -295,6 +295,13 @@ jobs:
             fi
           fi
 
+      - name: Package signed app for mount-free installation
+        run: |
+          set -euo pipefail
+          APP_PATH="TokenTrackerBar/build/DerivedData/Build/Products/Release/TokenTracker.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" \
+            "TokenTrackerBar/build/TokenTracker-${{ needs.sync.outputs.channel_version }}.app.zip"
+
       - name: Create DMG
         working-directory: TokenTrackerBar
         env:
@@ -318,6 +325,7 @@ jobs:
           node ../scripts/custom-collectors-release.cjs manifest \
             --build build/custom-collectors-build.json \
             --dmg "build/TokenTrackerBar-${{ needs.sync.outputs.channel_version }}.dmg" \
+            --app-zip "build/TokenTracker-${{ needs.sync.outputs.channel_version }}.app.zip" \
             --output build/custom-collectors.json
 
       - name: Upload custom-collectors DMG artifact
@@ -326,6 +334,7 @@ jobs:
           name: TokenTrackerBar-dmg-${{ needs.sync.outputs.channel_version }}-${{ needs.sync.outputs.head_sha }}
           path: |
             TokenTrackerBar/build/TokenTrackerBar-${{ needs.sync.outputs.channel_version }}.dmg
+            TokenTrackerBar/build/TokenTracker-${{ needs.sync.outputs.channel_version }}.app.zip
             TokenTrackerBar/build/custom-collectors.json
           if-no-files-found: error
           retention-days: 14
@@ -376,6 +385,8 @@ jobs:
           test -f "$asset"
           manifest="release-assets/custom-collectors.json"
           test -f "$manifest"
+          app_zip="release-assets/TokenTracker-${CHANNEL_VERSION}.app.zip"
+          test -f "$app_zip"
 
           notes="$(mktemp)"
           {
@@ -390,14 +401,14 @@ jobs:
           } > "$notes"
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$tag" "$asset" "$manifest" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$tag" "$asset" "$manifest" "$app_zip" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$tag" \
               --target "$HEAD_SHA" \
               --title "TokenTracker $CHANNEL_VERSION" \
               --notes-file "$notes" \
               --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$tag" "$asset" "$manifest" \
+            gh release create "$tag" "$asset" "$manifest" "$app_zip" \
               --target "$HEAD_SHA" \
               --prerelease \
               --title "TokenTracker $CHANNEL_VERSION" \
