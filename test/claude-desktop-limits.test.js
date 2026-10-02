@@ -5,7 +5,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { normalizeClaudeDesktopHistory, readClaudeDesktopUsageLimits } = require("../src/lib/claude-desktop-limits");
+const {
+  normalizeClaudeDesktopHistory,
+  normalizeClaudeDesktopUsage,
+  readClaudeDesktopAgentUsage,
+  readClaudeDesktopUsageLimits,
+} = require("../src/lib/claude-desktop-limits");
 
 const nowMs = Date.parse("2026-10-02T12:00:00Z");
 const sample = (u, t = nowMs - 60_000, org = "private-org") => ({ t, org, u });
@@ -73,6 +78,91 @@ test("desktop history rejects malformed schemas, timestamps and percentages", ()
     history(sample({ fh: null, sd: null }))]) {
     assert.equal(normalizeClaudeDesktopHistory(invalid, { nowMs }), null);
   }
+});
+
+test("desktop usage normalizes only structured non-negative token fields", () => {
+  assert.deepEqual(normalizeClaudeDesktopUsage({
+    input_tokens: 100,
+    cache_read_input_tokens: 20,
+    cache_creation_input_tokens: 5,
+    output_tokens: "7",
+  }), {
+    input_tokens: 100,
+    cache_read_input_tokens: 20,
+    cache_creation_input_tokens: 5,
+    output_tokens: 7,
+    total_tokens: 132,
+  });
+  assert.equal(normalizeClaudeDesktopUsage({ total_tokens: 100 }), null);
+  assert.equal(normalizeClaudeDesktopUsage({ input_tokens: -1, output_tokens: 2 }), null);
+  assert.equal(normalizeClaudeDesktopUsage({ input_tokens: "not-a-number" }), null);
+});
+
+test("desktop Agent/Cowork JSONL usage is deduplicated without returning message content", async (t) => {
+  const f = fixture(t);
+  const first = path.join(f.root, "local-agent-mode-sessions", "workspace", ".claude", "projects", "one.jsonl");
+  const duplicate = path.join(f.root, "claude-code-sessions", "copy.jsonl");
+  const records = [
+    { type: "user", message: { content: [{ type: "text", text: "PRIVATE PROMPT" }] } },
+    { type: "assistant", timestamp: "2026-10-02T11:00:00Z", requestId: "req-1",
+      message: { id: "msg-1", model: "claude-sonnet-4", content: "PRIVATE RESPONSE",
+        usage: { input_tokens: 100, cache_read_input_tokens: 20, output_tokens: 7 } } },
+    { type: "assistant", timestamp: "2026-10-02T11:01:00Z",
+      message: { id: "msg-2", model: "claude-sonnet-4", usage: { input_tokens: 50, output_tokens: 5 } } },
+    { type: "assistant", message: { id: "ignored", usage: { total_tokens: 999 } } },
+    "truncated",
+  ];
+  fs.mkdirSync(path.dirname(first), { recursive: true });
+  fs.mkdirSync(path.dirname(duplicate), { recursive: true });
+  fs.writeFileSync(first, `${records.map((record) => typeof record === "string" ? record : JSON.stringify(record)).join("\n")}\n`);
+  fs.writeFileSync(duplicate, `${JSON.stringify(records[1])}\n`);
+
+  const result = await readClaudeDesktopAgentUsage(f.root, { nowMs });
+  assert.equal(result.detected, true);
+  assert.equal(result.session_files, 2);
+  assert.equal(result.usage_events, 2);
+  assert.equal(result.token_usage.input_tokens, 150);
+  assert.equal(result.token_usage.cache_read_input_tokens, 20);
+  assert.equal(result.token_usage.output_tokens, 12);
+  assert.equal(result.token_usage.total_tokens, 182);
+  assert.equal(result.token_usage.messages, 2);
+  assert.equal(result.token_usage.models[0].model, "claude-sonnet-4");
+  assert.ok(!JSON.stringify(result).includes("PRIVATE PROMPT"));
+  assert.ok(!JSON.stringify(result).includes("PRIVATE RESPONSE"));
+});
+
+test("desktop accounts expose unavailable usage when Agent files have no usage fields", async (t) => {
+  const f = fixture(t);
+  f.write(f.root, history(sample({ fh: 12, sd: 30 })));
+  const file = path.join(f.root, "local-agent-mode-sessions", "workspace", "session.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ type: "user", message: { content: "PRIVATE PROMPT" } }));
+
+  const [account] = await readClaudeDesktopUsageLimits(f.options);
+  assert.equal(account.metric, "quota-percent");
+  assert.equal(account.token_usage_status, "unavailable");
+  assert.equal(account.token_usage, null);
+  assert.equal(account.token_usage_files, 1);
+  assert.ok(!JSON.stringify(account).includes("PRIVATE PROMPT"));
+});
+
+test("a usage-only desktop profile is returned without inventing quota percentages", async (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, "local-agent-mode-sessions", "workspace", "session.jsonl");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ type: "assistant", timestamp: "2026-10-02T11:30:00Z",
+    message: { id: "msg-1", model: "claude-sonnet-4", usage: { input_tokens: 10, output_tokens: 2 } } }));
+
+  const [account] = await readClaudeDesktopUsageLimits(f.options);
+  assert.equal(account.metric, "token-usage");
+  assert.equal(account.token_usage_status, "observed");
+  assert.equal(account.token_usage.input_tokens, 10);
+  assert.equal(account.token_usage.output_tokens, 2);
+  assert.equal(account.token_usage.total_tokens, 12);
+  assert.equal(account.token_usage.messages, 1);
+  assert.equal(account.token_usage.models.length, 1);
+  assert.equal(account.token_usage.models[0].model, "claude-sonnet-4");
+  assert.ok(!Object.hasOwn(account, "five_hour") || account.five_hour == null);
 });
 
 test("a future sample cannot override an observed sample", () => {

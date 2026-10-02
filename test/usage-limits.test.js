@@ -695,6 +695,42 @@ describe("getUsageLimits Claude Desktop quota snapshots", () => {
       }
     });
   }
+
+  it("exposes local Agent usage in the public limits payload", async () => {
+    resetUsageLimitsCache();
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-limits-desktop-agent-"));
+    try {
+      const file = path.join(home, ".claude1", "local-agent-mode-sessions", "workspace", "session.jsonl");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-10-02T11:30:00Z",
+        requestId: "request-1",
+        message: {
+          id: "message-1",
+          model: "claude-sonnet-4",
+          usage: { input_tokens: 10, output_tokens: 2 },
+        },
+      }) + "\n");
+      const result = await getUsageLimits({
+        home, env: {}, platform: "linux", providerTimeoutMs: 1000,
+        securityRunner() { return { status: 1, stdout: "" }; },
+        commandRunner() { return { status: 1, stdout: "" }; },
+        fetchImpl() { return Promise.reject(new Error("unmocked")); },
+      });
+      const [account] = result.claude.desktop_accounts;
+      assert.equal(account.profile_id, ".claude1");
+      assert.equal(account.metric, "token-usage");
+      assert.equal(account.token_usage_status, "observed");
+      assert.equal(account.token_usage.total_tokens, 12);
+      assert.equal(account.token_usage.messages, 1);
+      assert.equal(account.five_hour, null);
+      assert.equal(account.seven_day, null);
+    } finally {
+      resetUsageLimitsCache();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("getUsageLimits", () => {

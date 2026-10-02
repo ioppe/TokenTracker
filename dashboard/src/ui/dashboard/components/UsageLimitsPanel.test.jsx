@@ -129,6 +129,42 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByRole("button", { name: /Claude Desktop Default account/ })).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("shows observed Code/Cowork token usage and an API estimate when priced", () => {
+    render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount({
+      metric: "token-usage",
+      five_hour: null,
+      seven_day: null,
+      token_usage_status: "observed",
+      token_usage_captured_at: "2026-10-02T11:00:00Z",
+      token_usage: {
+        input_tokens: 150,
+        cache_read_input_tokens: 20,
+        cache_creation_input_tokens: 0,
+        output_tokens: 12,
+        total_tokens: 182,
+        messages: 2,
+        estimated_cost_usd: 0.012345,
+        estimated_cost_status: "complete",
+      },
+    })] }} order={["claude"]} />);
+    expect(screen.getByText("Claude Desktop Default account")).toBeInTheDocument();
+    expect(screen.getByText(/182 tokens \| in 150 \| out 12/)).toBeInTheDocument();
+    expect(screen.getByText(/API est\. \$0\.012345/)).toBeInTheDocument();
+  });
+
+  it("shows an explicit unavailable state when a desktop session has no usage fields", () => {
+    render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount({
+      metric: "token-usage",
+      five_hour: null,
+      seven_day: null,
+      token_usage_status: "unavailable",
+      token_usage: null,
+    })] }} order={["claude"]} />);
+    expect(screen.getByText("Token usage unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Claude Desktop Default account/ }).textContent)
+      .toContain("Token usage");
+  });
+
   it("respects remaining mode, zero snapshots, numbered names and Claude visibility", () => {
     const claude = { configured: false, desktop_accounts: [desktopAccount({ profile_id: ".claude2", profile_number: 2,
       five_hour: { utilization: 0 }, seven_day: null })] };

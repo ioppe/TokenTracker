@@ -61,6 +61,24 @@ enum Strings {
     static var usageLimitsTitle: String { t("Limits", "限额", "限額", "上限", "한도") }
     static var claudeDesktopDefaultAccount: String { t("Default account", "默认账号", "預設帳號", "既定のアカウント", "기본 계정") }
     static var claudeDesktopQuotaSnapshot: String { t("Quota snapshot", "额度快照", "額度快照", "使用量スナップショット", "사용량 스냅샷") }
+    static var claudeDesktopTokenUsage: String { t("Token usage", "Token 用量", "Token 用量", "トークン使用量", "토큰 사용량") }
+    static var claudeDesktopTokenUsageUnavailable: String { t("Token usage unavailable", "Token 用量不可用", "Token 用量不可用", "トークン使用量は利用できません", "토큰 사용량을 사용할 수 없음") }
+    static var claudeDesktopTokenUsagePartial: String { t("Token usage is partial; some files were skipped", "Token 用量不完整，部分文件已跳过", "Token 用量不完整，部分檔案已略過", "トークン使用量は部分的です。一部のファイルをスキップしました", "토큰 사용량이 부분적이며 일부 파일을 건너뜀") }
+    static func claudeDesktopTokenUsageSummary(input: String, output: String, total: String, cost: String?, partial: Bool = false) -> String {
+        let suffix = cost.map {
+            t(" | API est. \($0)", " | API 估算 \($0)", " | API 估算 \($0)", " | API 推定 \($0)", " | API 예상 \($0)")
+        } ?? ""
+        let partialSuffix = partial
+            ? t(" | partial scan", " | 扫描不完整", " | 掃描不完整", " | 部分スキャン", " | 부분 스캔")
+            : ""
+        return t(
+            "Usage: \(total) tokens | in \(input) | out \(output)\(suffix)\(partialSuffix)",
+            "用量：\(total) tokens | 输入 \(input) | 输出 \(output)\(suffix)\(partialSuffix)",
+            "用量：\(total) tokens | 輸入 \(input) | 輸出 \(output)\(suffix)\(partialSuffix)",
+            "使用量：\(total) tokens | 入力 \(input) | 出力 \(output)\(suffix)\(partialSuffix)",
+            "사용량: \(total) tokens | 입력 \(input) | 출력 \(output)\(suffix)\(partialSuffix)"
+        )
+    }
     static func claudeDesktopNumberedAccount(_ number: Int) -> String {
         t("Account \(number)", "账号 \(number)", "帳號 \(number)", "アカウント \(number)", "계정 \(number)")
     }

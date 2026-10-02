@@ -68,6 +68,28 @@ type CodexUsageLimits = {
   readonly reset_credits?: CodexResetCredits | null;
 };
 
+type ClaudeDesktopTokenUsageModel = {
+  readonly model: string;
+  readonly input_tokens: number;
+  readonly cache_read_input_tokens: number;
+  readonly cache_creation_input_tokens: number;
+  readonly output_tokens: number;
+  readonly total_tokens: number;
+  readonly estimated_cost_usd: number | null;
+};
+
+type ClaudeDesktopTokenUsage = {
+  readonly input_tokens: number;
+  readonly cache_read_input_tokens: number;
+  readonly cache_creation_input_tokens: number;
+  readonly output_tokens: number;
+  readonly total_tokens: number;
+  readonly messages: number;
+  readonly models?: readonly ClaudeDesktopTokenUsageModel[];
+  readonly estimated_cost_usd: number | null;
+  readonly estimated_cost_status: "complete" | "partial" | "unavailable";
+};
+
 type ClaudeDesktopAccount = {
   readonly configured: boolean;
   readonly profile_id: string;
@@ -75,12 +97,18 @@ type ClaudeDesktopAccount = {
   readonly profile_name: string | null;
   readonly display_name: string | null;
   readonly is_selected: boolean;
-  readonly source: "local-history";
-  readonly metric: "quota-percent";
+  readonly source: "local-history" | "local-agent-session";
+  readonly metric: "quota-percent" | "token-usage";
   readonly cached_at: string;
   readonly stale: boolean;
   readonly five_hour: { utilization: number; resets_at: null } | null;
   readonly seven_day: { utilization: number; resets_at: null } | null;
+  readonly token_usage_status?: "observed" | "partial" | "unavailable";
+  readonly token_usage_source?: string;
+  readonly token_usage_files?: number;
+  readonly token_usage_truncated?: boolean;
+  readonly token_usage_captured_at?: string;
+  readonly token_usage?: ClaudeDesktopTokenUsage | null;
 };
 
 interface UsageLimitsData {

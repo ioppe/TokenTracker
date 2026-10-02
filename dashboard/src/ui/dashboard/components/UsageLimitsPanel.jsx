@@ -3,6 +3,7 @@ import { Clock as ClockIcon, Infinity as InfinityIcon } from "lucide-react";
 import { Card } from "../../components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy, getCopyLocale } from "../../../lib/copy";
+import { formatCompactNumber } from "../../../lib/format";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
 import {
   LIMIT_PROVIDER_IDS,
@@ -600,7 +601,7 @@ function renderProviderExtra(kind, data) {
   return null;
 }
 
-function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge = null, subscription = null, now = Date.now(), groupKey = id) {
+function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge = null, subscription = null, now = Date.now(), groupKey = id, extraContent = null) {
   const spec = PROVIDER_LIMIT_SPECS[id];
   if (!spec) return null;
   // Pace is computed once per window here and shared by the bar + the detail.
@@ -608,13 +609,13 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
     .windows(data)
     .filter((s) => s.window)
     .map((s) => ({ spec: s, pace: paceForSpec(s, mode) }));
-  const extra = renderProviderExtra(spec.extra, data);
+  const extra = extraContent || renderProviderExtra(spec.extra, data);
   return (
     <ToolGroup
       key={groupKey}
       name={title}
       providerId={id}
-      expandable={rows.length > 0 || Boolean(subscription)}
+      expandable={rows.length > 0 || Boolean(subscription) || Boolean(extra)}
       expanded={expanded}
       onToggle={onToggle}
       badge={badge}
@@ -637,6 +638,52 @@ function desktopAccountName(account) {
     return copy("limits.claude_desktop.numbered_account", { number: account.profile_number });
   }
   return account.profile_name || copy("limits.claude_desktop.default_account");
+}
+
+function hasDesktopQuota(account) {
+  return account?.metric === "quota-percent" && Boolean(account.five_hour || account.seven_day);
+}
+
+function hasDesktopTokenData(account) {
+  return account?.metric === "token-usage"
+    || Boolean(account?.token_usage)
+    || account?.token_usage_status === "partial"
+    || account?.token_usage_status === "unavailable";
+}
+
+function formatApiEstimate(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6,
+  }).format(number);
+}
+
+function desktopTokenUsageText(account) {
+  if (account?.token_usage_status === "unavailable") {
+    return copy("limits.claude_desktop.token_usage_unavailable");
+  }
+  if (account?.token_usage_status === "partial" && !account?.token_usage) {
+    return copy("limits.claude_desktop.token_usage_partial");
+  }
+  const usage = account?.token_usage;
+  if (!usage) return null;
+  const formattedCost = usage.estimated_cost_usd == null
+    ? null : formatApiEstimate(usage.estimated_cost_usd);
+  const costSuffix = formattedCost
+    ? copy("limits.claude_desktop.token_usage_api_estimate", { cost: formattedCost })
+    : "";
+  const statusSuffix = account?.token_usage_status === "partial"
+    ? copy("limits.claude_desktop.token_usage_partial") : "";
+  return copy("limits.claude_desktop.token_usage", {
+    total: formatCompactNumber(usage.total_tokens),
+    input: formatCompactNumber(usage.input_tokens),
+    output: formatCompactNumber(usage.output_tokens),
+    cost_suffix: `${costSuffix}${statusSuffix}`,
+  });
 }
 
 // Provider row for states without usable limit data (not connected, inactive,
@@ -1233,8 +1280,8 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
     .filter((id) => !visibility || visibility[id] !== false || subscriptionByProvider.has(id))
     .flatMap((id) => {
       const desktopAccounts = id === "claude" && Array.isArray(claude?.desktop_accounts)
-        ? claude.desktop_accounts.filter((account) => account?.configured && account.metric === "quota-percent"
-          && (account.five_hour || account.seven_day))
+        ? claude.desktop_accounts.filter((account) => account?.configured
+          && (hasDesktopQuota(account) || hasDesktopTokenData(account)))
         : [];
       const subscription = subscriptionByProvider.get(id) || null;
       const provider = !dataById[id]?.configured && desktopAccounts.length > 0 && !subscription
@@ -1250,17 +1297,28 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
       return [provider, ...desktopAccounts.map((account) => {
         const key = `claude-desktop:${account.profile_id}`;
         const title = copy("limits.claude_desktop.title", { account: desktopAccountName(account) });
+        const tokenText = desktopTokenUsageText(account);
         const sampledAt = formatExactReset(Date.parse(account.cached_at));
+        const tokenStatus = account.token_usage_status;
+        const usageObserved = tokenStatus === "observed";
+        const usageUnavailable = tokenStatus === "unavailable";
+        const usagePartial = tokenStatus === "partial";
+        const hasTokenStatus = usageObserved || usageUnavailable || usagePartial;
         const badge = <StatusBadge
-          label={copy("limits.claude_desktop.history")}
-          age={ago(account.cached_at)}
-          tone={account.stale ? "stale" : "cached"}
-          tooltip={sampledAt ? copy("limits.claude_desktop.sampled_at", { time: sampledAt }) : null}
+          label={hasTokenStatus
+            ? copy("limits.claude_desktop.token_usage_badge")
+            : copy("limits.claude_desktop.history")}
+          age={ago(account.token_usage_captured_at || account.cached_at)}
+          tone={usageObserved ? "cached" : hasTokenStatus || account.stale ? "stale" : "cached"}
+          tooltip={!hasTokenStatus && sampledAt
+            ? copy("limits.claude_desktop.sampled_at", { time: sampledAt }) : null}
         />;
+        const tokenExtra = tokenText ? React.createElement(StatusLine, null, tokenText) : null;
         return renderConfiguredProvider(
           "claude", account, title, effectiveMode, expandedId === key,
           () => setExpandedId((prev) => prev === key ? null : key),
           badge, null, now, key,
+          tokenExtra,
         );
       })];
     })

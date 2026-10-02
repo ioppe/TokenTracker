@@ -39,7 +39,8 @@ function discoverClaudeDesktopProfiles({
   } catch (_e) { /* An unreadable home must not stop other collectors. */ }
 
   // Explicit Claude scan roots can also point to an Electron profile. Admit
-  // them as desktop roots only when they contain the known session directory.
+  // them as desktop roots only when they contain one of the known session
+  // directories. This covers ordinary Code sessions and Cowork/Agent data.
   const configured = config?.scanRoots?.claude;
   const explicit = [env.CLAUDE_CONFIG_DIR,
     ...(Array.isArray(configured) ? configured : [configured])];
@@ -47,7 +48,17 @@ function discoverClaudeDesktopProfiles({
     const root = expand(value, home);
     if (!root) continue;
     try {
-      if (statSync(path.join(root, "claude-code-sessions")).isDirectory()) candidates.push(root);
+      const hasKnownSessionDir = ["claude-code-sessions", "local-agent-mode-sessions", "projects"]
+        .some((name) => {
+          try {
+            return statSync(path.join(root, name)).isDirectory();
+          } catch (_e) {
+            return false;
+          }
+        });
+      if (hasKnownSessionDir) {
+        candidates.push(root);
+      }
     } catch (_e) { }
   }
 
@@ -75,4 +86,20 @@ function claudeDesktopTranscriptDirs(profiles) {
   ]);
 }
 
-module.exports = { claudeDesktopDefaultRoot, discoverClaudeDesktopProfiles, claudeDesktopTranscriptDirs };
+function claudeDesktopAgentSessionDirs(profiles) {
+  // This list is intentionally separate from claudeDesktopTranscriptDirs().
+  // The legacy sync collector treats Cowork workspaces as unrelated to the
+  // background token queue; usage-limits needs them only for local usage data.
+  return profiles.flatMap((root) => [
+    path.join(root, "projects"),
+    path.join(root, "claude-code-sessions"),
+    path.join(root, "local-agent-mode-sessions"),
+  ]);
+}
+
+module.exports = {
+  claudeDesktopDefaultRoot,
+  discoverClaudeDesktopProfiles,
+  claudeDesktopTranscriptDirs,
+  claudeDesktopAgentSessionDirs,
+};

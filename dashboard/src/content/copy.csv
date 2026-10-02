@@ -1503,6 +1503,11 @@ limits.claude_desktop.default_account,limits,LimitsPage,UsageLimitsPanel,desktop
 limits.claude_desktop.numbered_account,limits,LimitsPage,UsageLimitsPanel,desktop_numbered_account,"Account {{number}}",,active
 limits.claude_desktop.history,limits,LimitsPage,UsageLimitsPanel,desktop_history,"Quota snapshot",,active
 limits.claude_desktop.sampled_at,limits,LimitsPage,UsageLimitsPanel,desktop_sampled_at,"Quota sampled {{time}}",,active
+limits.claude_desktop.token_usage_badge,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_badge,"Token usage",,active
+limits.claude_desktop.token_usage,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage,"{{total}} tokens | in {{input}} | out {{output}}{{cost_suffix}}",,active
+limits.claude_desktop.token_usage_api_estimate,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_api_estimate," | API est. {{cost}}",,active
+limits.claude_desktop.token_usage_partial,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_partial," | partial scan",,active
+limits.claude_desktop.token_usage_unavailable,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_unavailable,"Token usage unavailable",,active
 limits.reauth.badge,limits,LimitsPage,UsageLimitsPanel,reauth_badge,"Re-auth",,active
 limits.reauth.tooltip,limits,LimitsPage,UsageLimitsPanel,reauth_tooltip,"Sign-in expired — run `{{command}}` in a terminal once to sign in again, then refresh.",,active
 shared.github.star,shared,*,GithubStar,star,"Star",,active

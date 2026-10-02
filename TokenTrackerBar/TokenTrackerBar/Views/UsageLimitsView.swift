@@ -102,21 +102,43 @@ struct UsageLimitsView: View {
         settings.providerOrder.flatMap { id -> [AnyView] in
             var groups = sectionIfContent(id: id, limits: limits).map { [$0] } ?? []
             if id == "claude", settings.isVisible(id) {
-                for account in limits.claude.desktopAccounts ?? [] where account.hasQuota {
+                for account in limits.claude.desktopAccounts ?? [] where account.hasData {
                     var specs: [LimitWindowSpec] = []
                     // Desktop history has no reset stamps: never derive pace or
                     // notification boundaries from the age of a quota sample.
-                    if let window = account.fiveHour { specs.append(makeSpec("5h", window.utilization, iso: nil)) }
-                    if let window = account.sevenDay { specs.append(makeSpec("7d", window.utilization, iso: nil)) }
+                    if account.hasQuota {
+                        if let window = account.fiveHour { specs.append(makeSpec("5h", window.utilization, iso: nil)) }
+                        if let window = account.sevenDay { specs.append(makeSpec("7d", window.utilization, iso: nil)) }
+                    }
                     let accountName = account.displayName
                         ?? account.profileNumber.map(Strings.claudeDesktopNumberedAccount)
                         ?? account.profileName
                         ?? Strings.claudeDesktopDefaultAccount
+                    let tokenSummary: String? = {
+                        if let usage = account.tokenUsage {
+                            let cost = usage.estimatedCostUsd.map(TokenFormatter.formatCost)
+                            return Strings.claudeDesktopTokenUsageSummary(
+                                input: TokenFormatter.formatCompact(usage.inputTokens),
+                                output: TokenFormatter.formatCompact(usage.outputTokens),
+                                total: TokenFormatter.formatCompact(usage.totalTokens),
+                                cost: cost,
+                                partial: account.tokenUsageStatus == "partial"
+                            )
+                        }
+                        switch account.tokenUsageStatus {
+                        case "unavailable": return Strings.claudeDesktopTokenUsageUnavailable
+                        case "partial": return Strings.claudeDesktopTokenUsagePartial
+                        default: return nil
+                        }
+                    }()
                     if let group = toolSection(
                         id: "claude-desktop:\(account.id)",
                         title: Strings.claudeDesktopTitle(accountName),
                         assetName: "ClaudeLogo", toolName: "Claude", specs: specs,
-                        titleSuffix: Strings.claudeDesktopQuotaSnapshot,
+                        titleSuffix: account.hasQuota
+                            ? Strings.claudeDesktopQuotaSnapshot
+                            : Strings.claudeDesktopTokenUsage,
+                        detailText: tokenSummary,
                         updatedAtISO: account.cachedAt, isStale: account.stale
                     ) { groups.append(group) }
                 }
@@ -210,6 +232,9 @@ struct UsageLimitsView: View {
         /// "· Parallel: 20" concurrency cap). Renders caption2/tertiary so it
         /// reads as metadata, not part of the provider name.
         titleSuffix: String? = nil,
+        /// Metadata-only usage text shown below the bars when a provider has no
+        /// percentage windows, such as a Claude Desktop Agent session.
+        detailText: String? = nil,
         // Provider's own last-fetch stamp (Claude/Codex); nil falls back to the
         // response-level `fetched_at`, which is when every live provider was read.
         updatedAtISO: String? = nil,
@@ -226,7 +251,7 @@ struct UsageLimitsView: View {
         // nothing meaningful under the heading — return nil rather than render
         // a bare provider title.
         guard !specs.isEmpty || subscription != nil || !resetRows.isEmpty
-            || resetStatus != nil || serviceStatus != nil else {
+            || resetStatus != nil || serviceStatus != nil || detailText != nil else {
             return nil
         }
         let isOpen = Binding(
@@ -261,6 +286,12 @@ struct UsageLimitsView: View {
             VStack(spacing: 4) {
                 ForEach(specs) { spec in
                     limitRow(label: spec.label, pct: spec.pct, reset: spec.resetText, toolName: toolName, windowSeconds: spec.windowSeconds, resetDate: spec.resetDate)
+                }
+                if let detailText {
+                    Text(detailText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
                 if let sub = subscription {
                     subscriptionRow(for: sub)
