@@ -16,6 +16,9 @@ const AGENT_JSONL_MAX_BYTES = 16 * 1024 * 1024;
 const AGENT_MAX_FILES = 600;
 const AGENT_MAX_DEPTH = 16;
 const AGENT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const AGENT_USAGE_CACHE_VERSION = 1;
+const AGENT_USAGE_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const AGENT_USAGE_CACHE_DIR = "claude-desktop-usage";
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const TOKEN_USAGE_SOURCE = "local-agent-session";
@@ -43,18 +46,56 @@ async function readJson(filePath, maxBytes) {
   try { return JSON.parse(raw); } catch (_e) { return null; }
 }
 
-async function readBoundedText(filePath, maxBytes) {
+async function readBoundedBytes(filePath, startOffset, maxBytes) {
   try {
     const stat = await fs.lstat(filePath);
     if (!stat.isFile()) return null;
-    if (stat.size > maxBytes) {
-      return { skipped: true, mtimeMs: stat.mtimeMs, bytes: stat.size };
+    if (stat.size > AGENT_JSONL_MAX_BYTES) {
+      return {
+        skipped: true,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ino: Number(stat.ino) || 0,
+        dev: Number(stat.dev) || 0,
+      };
     }
-    return {
-      raw: await fs.readFile(filePath, "utf8"),
-      mtimeMs: stat.mtimeMs,
-      bytes: stat.size,
-    };
+    const start = Math.max(0, Math.min(Number(startOffset) || 0, stat.size));
+    const length = stat.size - start;
+    if (length > maxBytes) {
+      return {
+        skipped: true,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ino: Number(stat.ino) || 0,
+        dev: Number(stat.dev) || 0,
+      };
+    }
+    const handle = await fs.open(filePath, "r");
+    try {
+      const raw = Buffer.alloc(length);
+      let bytesRead = 0;
+      while (bytesRead < length) {
+        const result = await handle.read({
+          buffer: raw,
+          offset: bytesRead,
+          length: length - bytesRead,
+          position: start + bytesRead,
+        });
+        if (!result.bytesRead) break;
+        bytesRead += result.bytesRead;
+      }
+      return {
+        raw: bytesRead === length ? raw : raw.subarray(0, bytesRead),
+        startOffset: start,
+        bytes: bytesRead,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ino: Number(stat.ino) || 0,
+        dev: Number(stat.dev) || 0,
+      };
+    } finally {
+      await handle.close().catch(() => {});
+    }
   } catch (_e) {
     return null;
   }
@@ -140,15 +181,87 @@ function usageEventParts(record) {
   const messageId = firstText(message?.id, record?.message_id, eventMessage?.id, event?.message_id);
   const requestId = firstText(record?.requestId, record?.request_id, event?.requestId, event?.request_id);
   const fallbackId = firstText(record?.uuid, event?.uuid, record?.id, event?.id);
-  return { usage, model, messageId, requestId, fallbackId, event };
+  const sessionId = firstText(
+    record?.session_id,
+    record?.sessionId,
+    record?.conversation_id,
+    record?.conversationId,
+    record?.thread_id,
+    record?.threadId,
+    event?.session_id,
+    event?.sessionId,
+    event?.conversation_id,
+    event?.conversationId,
+    event?.thread_id,
+    event?.threadId,
+  );
+  return { usage, model, messageId, requestId, fallbackId, sessionId, event };
 }
 
-function usageEventIdentity(parts, filePath, lineNumber) {
-  if (parts.messageId && parts.requestId) return `message:${parts.messageId}:${parts.requestId}`;
+function usageEventIdentity(parts, usage, timestampMs) {
   if (parts.messageId) return `message:${parts.messageId}`;
   if (parts.requestId) return `request:${parts.requestId}`;
   if (parts.fallbackId) return `event:${parts.fallbackId}`;
-  return `line:${filePath}:${lineNumber}`;
+  const usageKey = TOKEN_FIELDS
+    .filter((key) => key !== "total_tokens")
+    .map((key) => usage[key] || 0)
+    .join(",");
+  return [
+    "fingerprint",
+    parts.sessionId || "",
+    parts.model,
+    timestampMs,
+    usageKey,
+  ].join(":");
+}
+
+function eventIdentityDigest(identity) {
+  return crypto.createHash("sha256").update(identity).digest("hex").slice(0, 32);
+}
+
+function chooseUsageEvent(previous, candidate) {
+  if (!previous) return candidate;
+  if (candidate.usage.total_tokens > previous.usage.total_tokens) return candidate;
+  if (candidate.usage.total_tokens === previous.usage.total_tokens
+    && candidate.timestampMs >= previous.timestampMs) return candidate;
+  return previous;
+}
+
+function usageCachePath(home, root) {
+  const key = crypto.createHash("sha256").update(root).digest("hex").slice(0, 24);
+  return path.join(home, ".tokentracker", "tracker", AGENT_USAGE_CACHE_DIR, `${key}.json`);
+}
+
+async function readAgentUsageCache(cachePath) {
+  if (!cachePath) return { version: AGENT_USAGE_CACHE_VERSION, files: {} };
+  const raw = await readSmallFile(cachePath, AGENT_USAGE_CACHE_MAX_BYTES);
+  if (raw === null) return { version: AGENT_USAGE_CACHE_VERSION, files: {} };
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== AGENT_USAGE_CACHE_VERSION
+      || !parsed.files || typeof parsed.files !== "object" || Array.isArray(parsed.files)) {
+      return { version: AGENT_USAGE_CACHE_VERSION, files: {} };
+    }
+    return parsed;
+  } catch (_e) {
+    return { version: AGENT_USAGE_CACHE_VERSION, files: {} };
+  }
+}
+
+async function writeAgentUsageCache(cachePath, files) {
+  if (!cachePath) return false;
+  const payload = JSON.stringify({ version: AGENT_USAGE_CACHE_VERSION, files });
+  if (Buffer.byteLength(payload, "utf8") > AGENT_USAGE_CACHE_MAX_BYTES) return false;
+  const temporary = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await fs.mkdir(path.dirname(cachePath), { recursive: true });
+    await fs.writeFile(temporary, payload, { encoding: "utf8", mode: 0o600 });
+    await fs.rename(temporary, cachePath);
+    return true;
+  } catch (_e) {
+    await fs.rm(temporary, { force: true }).catch(() => {});
+    return false;
+  }
 }
 
 async function listJsonlFiles(root, {
@@ -203,7 +316,7 @@ function estimateClaudeDesktopCost(model, totals) {
   });
 }
 
-function buildTokenUsage(events) {
+function buildTokenUsage(events, scanStats = null) {
   const totals = emptyUsageTotals();
   const byModel = new Map();
   for (const event of events) {
@@ -232,10 +345,117 @@ function buildTokenUsage(events) {
     estimated_cost_status: priced.length === 0
       ? "unavailable"
       : priced.length === models.length ? "complete" : "partial",
+    ...(scanStats ? { scan_stats: scanStats } : {}),
   };
 }
 
-async function readClaudeDesktopAgentUsage(root, { nowMs = Date.now() } = {}) {
+async function statAgentFile(filePath) {
+  try {
+    const stat = await fs.lstat(filePath);
+    if (!stat.isFile()) return null;
+    return {
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ino: Number(stat.ino) || 0,
+      dev: Number(stat.dev) || 0,
+    };
+  } catch (_e) {
+    return null;
+  }
+}
+
+function cacheEntryMatchesStat(entry, stat) {
+  return Boolean(entry
+    && Number(entry.size) === stat.size
+    && Number(entry.mtimeMs) === stat.mtimeMs
+    && Number(entry.ino) === stat.ino
+    && Number(entry.dev) === stat.dev
+    && Array.isArray(entry.events));
+}
+
+function cacheEntryEvents(entry) {
+  if (!Array.isArray(entry?.events)) return new Map();
+  const events = new Map();
+  for (const value of entry.events) {
+    if (!value || typeof value !== "object" || typeof value.identity !== "string") continue;
+    const usage = normalizeClaudeDesktopUsage(value.usage);
+    if (!usage || typeof value.model !== "string" || !Number.isFinite(value.timestampMs)) continue;
+    events.set(value.identity, {
+      identity: value.identity,
+      model: value.model,
+      usage,
+      timestampMs: value.timestampMs,
+    });
+  }
+  return events;
+}
+
+function parseAgentUsageBuffer(raw, {
+  baseOffset = 0,
+  lineCount = 0,
+  previousEvents = new Map(),
+  fallbackMs = null,
+  nowMs,
+} = {}) {
+  const text = raw.toString("utf8");
+  const lines = text.split("\n");
+  const events = new Map(previousEvents);
+  let usageRecords = 0;
+  let duplicateRecords = 0;
+  let completedLines = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const terminated = index < lines.length - 1;
+    const line = lines[index].endsWith("\r") ? lines[index].slice(0, -1) : lines[index];
+    if (line.trim()) {
+      let record;
+      try {
+        record = JSON.parse(line);
+      } catch (_e) {
+        record = null;
+      }
+      const parts = usageEventParts(record);
+      const usage = normalizeClaudeDesktopUsage(parts.usage);
+      if (usage) {
+        usageRecords += 1;
+        const timestampMs = safeObservedTimestamp([
+          record.timestamp,
+          record.created_at,
+          record.time,
+          record.message?.created_at,
+          parts.event?.timestamp,
+          parts.event?.time,
+        ], fallbackMs, nowMs);
+        const identity = eventIdentityDigest(usageEventIdentity(parts, usage, timestampMs));
+        const candidate = {
+          identity,
+          model: parts.model,
+          usage,
+          timestampMs,
+        };
+        const previous = events.get(identity);
+        const selected = chooseUsageEvent(previous, candidate);
+        if (previous) duplicateRecords += 1;
+        events.set(identity, selected);
+      }
+    }
+    if (terminated) completedLines += 1;
+  }
+
+  const lastNewline = raw.lastIndexOf(0x0a);
+  return {
+    events,
+    usageRecords,
+    duplicateRecords,
+    lineCount: lineCount + completedLines,
+    completeOffset: baseOffset + (lastNewline >= 0 ? lastNewline + 1 : 0),
+  };
+}
+
+async function readClaudeDesktopAgentUsage(root, {
+  nowMs = Date.now(),
+  cachePath = null,
+} = {}) {
   const files = [];
   const seen = new Set();
   let truncated = false;
@@ -249,17 +469,64 @@ async function readClaudeDesktopAgentUsage(root, { nowMs = Date.now() } = {}) {
     }
   }
 
+  const cache = await readAgentUsageCache(cachePath);
+  const nextCacheFiles = {};
   const events = new Map();
   let latestFileMs = 0;
   let bytesRead = 0;
+  const scanStats = {
+    files_discovered: files.length,
+    files_scanned: 0,
+    files_reused: 0,
+    files_incremental: 0,
+    files_reparsed: 0,
+    bytes_read: 0,
+    cached_events_reused: 0,
+    usage_events_seen: 0,
+    usage_events_deduplicated: 0,
+    cache_enabled: Boolean(cachePath),
+  };
+
+  const addFileEvents = (fileEvents) => {
+    for (const [identity, event] of fileEvents.entries()) {
+      const previous = events.get(identity);
+      if (previous) scanStats.usage_events_deduplicated += 1;
+      events.set(identity, chooseUsageEvent(previous, event));
+    }
+  };
+
   for (const filePath of files) {
     if (bytesRead >= AGENT_MAX_TOTAL_BYTES) {
       truncated = true;
       break;
     }
+    const stat = await statAgentFile(filePath);
+    if (!stat) continue;
+    latestFileMs = Math.max(latestFileMs, Number(stat.mtimeMs) || 0);
+    const previous = cache.files?.[filePath];
+
+    if (cacheEntryMatchesStat(previous, stat)) {
+      const cachedEvents = cacheEntryEvents(previous);
+      nextCacheFiles[filePath] = previous;
+      scanStats.files_reused += 1;
+      scanStats.cached_events_reused += cachedEvents.size;
+      addFileEvents(cachedEvents);
+      continue;
+    }
+
+    const previousEvents = cacheEntryEvents(previous);
+    const sameFile = previous
+      && Number(previous.ino) === stat.ino
+      && Number(previous.dev) === stat.dev
+      && stat.size >= Number(previous.size)
+      && Number(previous.completeOffset) >= 0
+      && Number(previous.completeOffset) <= stat.size
+      && Array.isArray(previous.events);
+    const startOffset = sameFile ? Number(previous.completeOffset) : 0;
     const remainingBytes = AGENT_MAX_TOTAL_BYTES - bytesRead;
-    const content = await readBoundedText(
+    const content = await readBoundedBytes(
       filePath,
+      startOffset,
       Math.min(AGENT_JSONL_MAX_BYTES, remainingBytes),
     );
     if (!content) continue;
@@ -267,46 +534,47 @@ async function readClaudeDesktopAgentUsage(root, { nowMs = Date.now() } = {}) {
       truncated = true;
       break;
     }
-    const contentBytes = Buffer.byteLength(content.raw, "utf8");
+    const contentBytes = content.bytes;
     if (bytesRead + contentBytes > AGENT_MAX_TOTAL_BYTES) {
       truncated = true;
       break;
     }
     bytesRead += contentBytes;
-    latestFileMs = Math.max(latestFileMs, Number(content.mtimeMs) || 0);
-    const lines = content.raw.split(/\r?\n/);
-    for (let lineNumber = 0; lineNumber < lines.length; lineNumber += 1) {
-      const line = lines[lineNumber].trim();
-      if (!line) continue;
-      let record;
-      try {
-        record = JSON.parse(line);
-      } catch (_e) {
-        continue;
-      }
-      const parts = usageEventParts(record);
-      const usage = normalizeClaudeDesktopUsage(parts.usage);
-      if (!usage) continue;
-      const timestampMs = safeObservedTimestamp([
-        record.timestamp,
-        record.created_at,
-        record.time,
-        record.message?.created_at,
-        parts.event?.timestamp,
-        parts.event?.time,
-      ], content.mtimeMs, nowMs);
-      const identity = usageEventIdentity(parts, filePath, lineNumber);
-      const candidate = { model: parts.model, usage, timestampMs };
-      const previous = events.get(identity);
-      if (!previous
-        || usage.total_tokens > previous.usage.total_tokens
-        || (usage.total_tokens === previous.usage.total_tokens && timestampMs >= previous.timestampMs)) {
-        events.set(identity, candidate);
-      }
-    }
+    const parsed = parseAgentUsageBuffer(content.raw, {
+      baseOffset: content.startOffset,
+      lineCount: sameFile ? Number(previous.lineCount) || 0 : 0,
+      previousEvents: sameFile ? previousEvents : new Map(),
+      fallbackMs: sameFile
+        ? Number(previous.identityFallbackMs) || Number(content.mtimeMs) || nowMs
+        : Number(content.mtimeMs) || nowMs,
+      nowMs,
+    });
+    const entry = {
+      size: content.size,
+      mtimeMs: content.mtimeMs,
+      ino: content.ino,
+      dev: content.dev,
+      completeOffset: parsed.completeOffset,
+      lineCount: parsed.lineCount,
+      identityFallbackMs: sameFile
+        ? Number(previous.identityFallbackMs) || Number(content.mtimeMs) || nowMs
+        : Number(content.mtimeMs) || nowMs,
+      events: Array.from(parsed.events.values()),
+    };
+    nextCacheFiles[filePath] = entry;
+    scanStats.files_scanned += 1;
+    if (sameFile) scanStats.files_incremental += 1;
+    else scanStats.files_reparsed += 1;
+    scanStats.bytes_read += contentBytes;
+    scanStats.usage_events_seen += parsed.usageRecords;
+    scanStats.usage_events_deduplicated += parsed.duplicateRecords;
+    addFileEvents(parsed.events);
   }
 
-  const orderedEvents = Array.from(events.values());
+  await writeAgentUsageCache(cachePath, nextCacheFiles);
+
+  const orderedEvents = Array.from(events.values())
+    .sort((a, b) => a.timestampMs - b.timestampMs || a.identity.localeCompare(b.identity, "en"));
   const latestEventMs = orderedEvents.reduce((latest, event) => Math.max(latest, event.timestampMs), 0);
   const capturedAtMs = latestEventMs || latestFileMs || nowMs;
   return {
@@ -315,7 +583,8 @@ async function readClaudeDesktopAgentUsage(root, { nowMs = Date.now() } = {}) {
     truncated,
     usage_events: orderedEvents.length,
     captured_at: new Date(capturedAtMs).toISOString(),
-    token_usage: orderedEvents.length > 0 ? buildTokenUsage(orderedEvents) : null,
+    scan_stats: scanStats,
+    token_usage: orderedEvents.length > 0 ? buildTokenUsage(orderedEvents, scanStats) : null,
   };
 }
 
@@ -387,7 +656,10 @@ async function readClaudeDesktopUsageLimits({
   const accounts = await Promise.all(profiles.map(async (root) => {
     const [history, tokenUsage] = await Promise.all([
       readJson(path.join(root, "plan-usage-history.json"), HISTORY_MAX_BYTES),
-      readClaudeDesktopAgentUsage(root, { nowMs }),
+      readClaudeDesktopAgentUsage(root, {
+        nowMs,
+        cachePath: usageCachePath(home, root),
+      }),
     ]);
     const limits = normalizeClaudeDesktopHistory(history, { nowMs });
     if (!limits && !tokenUsage.detected) return null;
@@ -408,6 +680,7 @@ async function readClaudeDesktopUsageLimits({
         confidence: tokenUsageStatus,
         captured_at: tokenUsage.captured_at,
         session_files: tokenUsage.session_files,
+        scan_stats: tokenUsage.scan_stats,
       },
     } : {};
     const base = limits || {

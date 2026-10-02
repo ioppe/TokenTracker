@@ -131,6 +131,41 @@ test("desktop Agent/Cowork JSONL usage is deduplicated without returning message
   assert.ok(!JSON.stringify(result).includes("PRIVATE RESPONSE"));
 });
 
+test("desktop usage cache reuses unchanged files and reads appended records incrementally", async (t) => {
+  const f = fixture(t);
+  const file = path.join(f.root, "claude-code-sessions", "incremental.jsonl");
+  const cachePath = path.join(f.home, ".tokentracker", "tracker", "claude-desktop-usage.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const firstLine = JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-10-02T11:00:00Z",
+    message: { id: "incremental-1", model: "claude-sonnet-4", usage: { input_tokens: 10, output_tokens: 2 } },
+  }) + "\n";
+  const secondLine = JSON.stringify({
+    type: "assistant",
+    timestamp: "2026-10-02T11:01:00Z",
+    message: { id: "incremental-2", model: "claude-sonnet-4", usage: { input_tokens: 20, output_tokens: 4 } },
+  }) + "\n";
+  fs.writeFileSync(file, firstLine);
+
+  const first = await readClaudeDesktopAgentUsage(f.root, { nowMs, cachePath });
+  assert.equal(first.scan_stats.files_reparsed, 1);
+  assert.equal(first.scan_stats.files_reused, 0);
+  assert.equal(first.token_usage.total_tokens, 12);
+
+  fs.appendFileSync(file, secondLine);
+  const second = await readClaudeDesktopAgentUsage(f.root, { nowMs: nowMs + 60_000, cachePath });
+  assert.equal(second.scan_stats.files_incremental, 1);
+  assert.equal(second.scan_stats.files_reused, 0);
+  assert.equal(second.scan_stats.bytes_read, Buffer.byteLength(secondLine));
+  assert.equal(second.token_usage.total_tokens, 36);
+
+  const third = await readClaudeDesktopAgentUsage(f.root, { nowMs: nowMs + 120_000, cachePath });
+  assert.equal(third.scan_stats.files_reused, 1);
+  assert.equal(third.scan_stats.bytes_read, 0);
+  assert.equal(third.token_usage.total_tokens, 36);
+});
+
 test("desktop accounts expose unavailable usage when Agent files have no usage fields", async (t) => {
   const f = fixture(t);
   f.write(f.root, history(sample({ fh: 12, sd: 30 })));

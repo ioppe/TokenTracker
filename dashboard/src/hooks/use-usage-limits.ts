@@ -88,6 +88,18 @@ type ClaudeDesktopTokenUsage = {
   readonly models?: readonly ClaudeDesktopTokenUsageModel[];
   readonly estimated_cost_usd: number | null;
   readonly estimated_cost_status: "complete" | "partial" | "unavailable";
+  readonly scan_stats?: {
+    readonly files_discovered: number;
+    readonly files_scanned: number;
+    readonly files_reused: number;
+    readonly files_incremental: number;
+    readonly files_reparsed: number;
+    readonly bytes_read: number;
+    readonly cached_events_reused: number;
+    readonly usage_events_seen: number;
+    readonly usage_events_deduplicated: number;
+    readonly cache_enabled: boolean;
+  };
 };
 
 type ClaudeDesktopAccount = {
@@ -109,6 +121,13 @@ type ClaudeDesktopAccount = {
   readonly token_usage_truncated?: boolean;
   readonly token_usage_captured_at?: string;
   readonly token_usage?: ClaudeDesktopTokenUsage | null;
+  readonly token_usage_provenance?: {
+    readonly source?: string;
+    readonly confidence?: string;
+    readonly captured_at?: string;
+    readonly session_files?: number;
+    readonly scan_stats?: ClaudeDesktopTokenUsage["scan_stats"];
+  };
 };
 
 interface UsageLimitsData {
