@@ -77,17 +77,20 @@ test("manual build-only mode skips upstream fetch, merge and release publication
   const content = loadWorkflow();
   assert.match(content, /build_only:[\s\S]*?default: false[\s\S]*?type: boolean/);
   assert.match(content, /BUILD_ONLY: \$\{\{ \(github\.event_name == 'push' \|\| inputs\.build_only\) && 'true' \|\| 'false' \}\}/);
+  assert.match(content, /PUBLISH_RELEASE: \$\{\{ \(github\.event_name == 'push' \|\| !inputs\.build_only\) && 'true' \|\| 'false' \}\}/);
   assert.match(content, /name: Fetch upstream\s+if: \$\{\{ github\.event_name != 'push' && !inputs\.build_only \}\}/);
   assert.match(content, /if \[\[ "\$\{BUILD_ONLY\}" == "true" \]\]; then[\s\S]*?else\s+if ! git merge/);
-  assert.match(content, /if: \$\{\{ needs\.build\.result == 'success' && github\.event_name != 'push' && !inputs\.build_only \}\}/);
+  assert.match(content, /if: \$\{\{ needs\.build\.result == 'success' && \(github\.event_name == 'push' \|\| !inputs\.build_only\) \}\}/);
 });
 
-test("custom collector pushes build artifacts without merging or publishing", () => {
+test("custom collector pushes build artifacts and publishes the current prerelease", () => {
   const content = loadWorkflow();
   assert.match(content, /push:\s+branches: \[custom-collectors\]/);
   assert.match(content, /ref: \$\{\{ github\.event_name == 'push' && github\.sha \|\| env\.TARGET_BRANCH \}\}/);
   assert.match(content, /paths:[\s\S]*?- "src\/\*\*"[\s\S]*?- "dashboard\/\*\*"/);
   assert.match(content, /if: \$\{\{ github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'/);
+  assert.match(content, /PUBLISH_RELEASE/);
+  assert.match(content, /--target "\$HEAD_SHA"/);
 });
 
 test("custom builds verify desktop snapshots and native reset isolation", () => {

@@ -54,6 +54,7 @@ env:
   TARGET_BRANCH: ${{ inputs.target_branch || 'custom-collectors' }}
   UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
   BUILD_ONLY: ${{ (github.event_name == 'push' || inputs.build_only) && 'true' || 'false' }}
+  PUBLISH_RELEASE: ${{ (github.event_name == 'push' || !inputs.build_only) && 'true' || 'false' }}
   CUSTOM_CHANNEL_SUFFIX: custom-collectors
 
 jobs:
@@ -323,17 +324,17 @@ jobs:
             echo "- Upstream release version: \\`${{ needs.sync.outputs.version }}\\`"
             echo "- Custom channel version: \\`${{ needs.sync.outputs.channel_version }}\\`"
             echo "- Artifact retention: 14 days"
-            if [[ "${BUILD_ONLY}" == "true" ]]; then
-              echo "- Build-only: no upstream merge or prerelease publication"
-            else
+            if [[ "${PUBLISH_RELEASE}" == "true" ]]; then
               echo "- GitHub prerelease: [${{ needs.sync.outputs.release_tag }}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ needs.sync.outputs.release_tag }})"
+            else
+              echo "- Build-only: no upstream merge or prerelease publication"
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish-custom-collectors:
     name: Publish custom-collectors DMG release
     needs: [sync, build]
-    if: ${{ needs.build.result == 'success' && github.event_name != 'push' && !inputs.build_only }}
+    if: ${{ needs.build.result == 'success' && (github.event_name == 'push' || !inputs.build_only) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -372,6 +373,7 @@ jobs:
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$tag" \
+              --target "$HEAD_SHA" \
               --title "TokenTracker $CHANNEL_VERSION" \
               --notes-file "$notes" \
               --repo "$GITHUB_REPOSITORY"
