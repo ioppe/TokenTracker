@@ -114,4 +114,11 @@ test("custom packages stamp the fork update feed and publish a checksummed build
   assert.match(content, /custom-collectors-release\.cjs manifest/);
   assert.match(content, /gh release upload "\$tag" "\$asset" "\$manifest"/);
   assert.match(content, /-only-testing:TokenTrackerBarTests\/UpdateChannelTests/);
+  assert.match(content, /ditto -c -k --sequesterRsrc --keepParent/);
+  const zipStep = content.indexOf("name: Package signed app for mount-free installation");
+  assert.ok(zipStep > content.indexOf("codesign --verify --verbose=2"));
+  assert.ok(zipStep < content.indexOf("name: Create DMG"));
+  assert.doesNotMatch(content, /\\\$\{\{/);
+  assert.match(content, /--app-zip "build\/TokenTracker-\$\{\{ needs\.sync\.outputs\.channel_version \}\}\.app\.zip"/);
+  assert.match(content, /gh release upload "\$tag" "\$asset" "\$manifest" "\$app_zip"/);
 });

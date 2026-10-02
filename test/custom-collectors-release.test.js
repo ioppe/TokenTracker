@@ -69,4 +69,8 @@ test("release manifest binds the custom build to the exact DMG bytes", async (t)
   const result = await releaseManifest(buildMetadata(env, "1.1.9"), dmg);
   assert.equal(result.dmg_sha256, crypto.createHash("sha256").update("custom collectors dmg").digest("hex"));
   assert.equal(result.source_sha, env.CUSTOM_SOURCE_SHA);
+  const appZip = path.join(f.app, "app.zip");
+  fs.writeFileSync(appZip, "signed custom app zip");
+  const zipResult = await releaseManifest(buildMetadata(env, "1.1.9"), dmg, appZip);
+  assert.equal(zipResult.app_zip_sha256, crypto.createHash("sha256").update("signed custom app zip").digest("hex"));
 });

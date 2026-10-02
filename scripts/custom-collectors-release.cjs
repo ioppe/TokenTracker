@@ -58,23 +58,30 @@ function stampApp(app, metadata, run = execFileSync) {
   }
 }
 
-async function releaseManifest(metadata, dmg) {
+async function sha256(file) {
   const hash = crypto.createHash("sha256");
-  for await (const chunk of fs.createReadStream(dmg)) hash.update(chunk);
-  return { ...metadata, dmg_sha256: hash.digest("hex") };
+  for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+async function releaseManifest(metadata, dmg, appZip = null) {
+  return {
+    ...metadata, dmg_sha256: await sha256(dmg),
+    ...(appZip ? { app_zip_sha256: await sha256(appZip) } : {}),
+  };
 }
 
 async function main() {
   const { positionals, values } = parseArgs({
     allowPositionals: true,
-    options: { app: { type: "string" }, build: { type: "string" }, dmg: { type: "string" }, output: { type: "string" } },
+    options: { app: { type: "string" }, build: { type: "string" }, dmg: { type: "string" }, "app-zip": { type: "string" }, output: { type: "string" } },
   });
   let result;
   if (positionals[0] === "stamp" && values.app && values.output) {
     result = buildMetadata(process.env, require("../package.json").version);
     stampApp(values.app, result);
   } else if (positionals[0] === "manifest" && values.build && values.dmg && values.output) {
-    result = await releaseManifest(JSON.parse(fs.readFileSync(values.build, "utf8")), values.dmg);
+    result = await releaseManifest(JSON.parse(fs.readFileSync(values.build, "utf8")), values.dmg, values["app-zip"]);
   } else {
     throw new Error("Use stamp --app <app> --output <json> or manifest --build <json> --dmg <dmg> --output <json>");
   }
