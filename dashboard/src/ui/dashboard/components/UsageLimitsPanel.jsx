@@ -332,11 +332,11 @@ function StatusBadge({ label, age = null, tone = "live", tooltip = null }) {
 function ToolGroup({ name, providerId, children, expandable = false, expanded = false, onToggle, badge = null, rightAdornment = null }) {
   const providerKey = limitProviderIconKey(providerId);
   const header = (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       {providerKey ? (
         <ProviderIcon provider={providerKey} size={14} className={LIMITS_PROVIDER_ICON_CLASS} />
       ) : null}
-      <span className="text-sm font-medium text-oai-black dark:text-oai-white">{name}</span>
+      <span className="min-w-0 max-w-full break-words text-sm font-medium text-oai-black dark:text-oai-white">{name}</span>
       {rightAdornment ? <span className="shrink-0">{rightAdornment}</span> : null}
       {badge}
     </div>
@@ -600,7 +600,7 @@ function renderProviderExtra(kind, data) {
   return null;
 }
 
-function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge = null, subscription = null, now = Date.now()) {
+function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, badge = null, subscription = null, now = Date.now(), groupKey = id) {
   const spec = PROVIDER_LIMIT_SPECS[id];
   if (!spec) return null;
   // Pace is computed once per window here and shared by the bar + the detail.
@@ -611,7 +611,7 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
   const extra = renderProviderExtra(spec.extra, data);
   return (
     <ToolGroup
-      key={id}
+      key={groupKey}
       name={title}
       providerId={id}
       expandable={rows.length > 0 || Boolean(subscription)}
@@ -628,6 +628,15 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
       ) : null}
     </ToolGroup>
   );
+}
+
+function desktopAccountName(account) {
+  if (account.display_name) return account.display_name;
+  if (account.profile_id === "default") return copy("limits.claude_desktop.default_account");
+  if (account.profile_number != null) {
+    return copy("limits.claude_desktop.numbered_account", { number: account.profile_number });
+  }
+  return account.profile_name || copy("limits.claude_desktop.default_account");
 }
 
 // Provider row for states without usable limit data (not connected, inactive,
@@ -1222,16 +1231,38 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
   // entered by hand — that data keeps its row regardless of visibility prefs.
   const groups = effectiveOrder
     .filter((id) => !visibility || visibility[id] !== false || subscriptionByProvider.has(id))
-    .map((id) => {
-      return renderProviderGroup(
+    .flatMap((id) => {
+      const desktopAccounts = id === "claude" && Array.isArray(claude?.desktop_accounts)
+        ? claude.desktop_accounts.filter((account) => account?.configured && account.metric === "quota-percent"
+          && (account.five_hour || account.seven_day))
+        : [];
+      const subscription = subscriptionByProvider.get(id) || null;
+      const provider = !dataById[id]?.configured && desktopAccounts.length > 0 && !subscription
+        ? null : renderProviderGroup(
         id,
         dataById[id],
         effectiveMode,
         expandedId === id,
         () => setExpandedId((prev) => (prev === id ? null : id)),
-        subscriptionByProvider.get(id) || null,
+        subscription,
         now,
       );
+      return [provider, ...desktopAccounts.map((account) => {
+        const key = `claude-desktop:${account.profile_id}`;
+        const title = copy("limits.claude_desktop.title", { account: desktopAccountName(account) });
+        const sampledAt = formatExactReset(Date.parse(account.cached_at));
+        const badge = <StatusBadge
+          label={copy("limits.claude_desktop.history")}
+          age={ago(account.cached_at)}
+          tone={account.stale ? "stale" : "cached"}
+          tooltip={sampledAt ? copy("limits.claude_desktop.sampled_at", { time: sampledAt }) : null}
+        />;
+        return renderConfiguredProvider(
+          "claude", account, title, effectiveMode, expandedId === key,
+          () => setExpandedId((prev) => prev === key ? null : key),
+          badge, null, now, key,
+        );
+      })];
     })
     .filter(Boolean);
 

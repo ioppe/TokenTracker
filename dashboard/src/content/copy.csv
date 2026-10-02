@@ -1498,6 +1498,11 @@ limits.alert.blocked,limits,LimitsPage,LimitsPage,alert_blocked,"Notifications a
 limits.provenance.fresh,limits,LimitsPage,UsageLimitsPanel,provenance_fresh,"Live",,active
 limits.provenance.stale,limits,LimitsPage,UsageLimitsPanel,provenance_stale,"Stale",,active
 limits.provenance.tooltip,limits,LimitsPage,UsageLimitsPanel,provenance_tooltip,"Source: {{source}}; confidence: {{confidence}}",,active
+limits.claude_desktop.title,limits,LimitsPage,UsageLimitsPanel,desktop_title,"Claude Desktop {{account}}",,active
+limits.claude_desktop.default_account,limits,LimitsPage,UsageLimitsPanel,desktop_default_account,"Default account",,active
+limits.claude_desktop.numbered_account,limits,LimitsPage,UsageLimitsPanel,desktop_numbered_account,"Account {{number}}",,active
+limits.claude_desktop.history,limits,LimitsPage,UsageLimitsPanel,desktop_history,"Quota snapshot",,active
+limits.claude_desktop.sampled_at,limits,LimitsPage,UsageLimitsPanel,desktop_sampled_at,"Quota sampled {{time}}",,active
 limits.reauth.badge,limits,LimitsPage,UsageLimitsPanel,reauth_badge,"Re-auth",,active
 limits.reauth.tooltip,limits,LimitsPage,UsageLimitsPanel,reauth_tooltip,"Sign-in expired — run `{{command}}` in a terminal once to sign in again, then refresh.",,active
 shared.github.star,shared,*,GithubStar,star,"Star",,active

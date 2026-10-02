@@ -59,6 +59,14 @@ enum Strings {
     }
 
     static var usageLimitsTitle: String { t("Limits", "限额", "限額", "上限", "한도") }
+    static var claudeDesktopDefaultAccount: String { t("Default account", "默认账号", "預設帳號", "既定のアカウント", "기본 계정") }
+    static var claudeDesktopQuotaSnapshot: String { t("Quota snapshot", "额度快照", "額度快照", "使用量スナップショット", "사용량 스냅샷") }
+    static func claudeDesktopNumberedAccount(_ number: Int) -> String {
+        t("Account \(number)", "账号 \(number)", "帳號 \(number)", "アカウント \(number)", "계정 \(number)")
+    }
+    static func claudeDesktopTitle(_ account: String) -> String {
+        t("Claude Desktop \(account)", "Claude 桌面端 \(account)", "Claude 桌面端 \(account)", "Claude デスクトップ \(account)", "Claude 데스크톱 \(account)")
+    }
     static var providerServiceIssue: String { t("Service issue reported", "服务异常", "服務異常", "サービス障害が報告されています", "서비스 장애가 보고됨") }
     static var providerStatusOpenPage: String { t("Open status page", "打开状态页", "打開狀態頁", "ステータスページを開く", "상태 페이지 열기") }
     static var sessionExpired: String { t("Session expired", "会话已过期", "會話已過期", "セッションが期限切れです", "세션이 만료되었습니다") }

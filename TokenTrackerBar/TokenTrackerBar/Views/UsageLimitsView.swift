@@ -99,7 +99,30 @@ struct UsageLimitsView: View {
     }
 
     private func buildVisibleGroups(_ limits: UsageLimitsResponse) -> [AnyView] {
-        settings.providerOrder.compactMap { sectionIfContent(id: $0, limits: limits) }
+        settings.providerOrder.flatMap { id -> [AnyView] in
+            var groups = sectionIfContent(id: id, limits: limits).map { [$0] } ?? []
+            if id == "claude", settings.isVisible(id) {
+                for account in limits.claude.desktopAccounts ?? [] where account.hasQuota {
+                    var specs: [LimitWindowSpec] = []
+                    // Desktop history has no reset stamps: never derive pace or
+                    // notification boundaries from the age of a quota sample.
+                    if let window = account.fiveHour { specs.append(makeSpec("5h", window.utilization, iso: nil)) }
+                    if let window = account.sevenDay { specs.append(makeSpec("7d", window.utilization, iso: nil)) }
+                    let accountName = account.displayName
+                        ?? account.profileNumber.map(Strings.claudeDesktopNumberedAccount)
+                        ?? account.profileName
+                        ?? Strings.claudeDesktopDefaultAccount
+                    if let group = toolSection(
+                        id: "claude-desktop:\(account.id)",
+                        title: Strings.claudeDesktopTitle(accountName),
+                        assetName: "ClaudeLogo", toolName: "Claude", specs: specs,
+                        titleSuffix: Strings.claudeDesktopQuotaSnapshot,
+                        updatedAtISO: account.cachedAt, isStale: account.stale
+                    ) { groups.append(group) }
+                }
+            }
+            return groups
+        }
     }
 
     /// Builds one provider's section, or nil when it would carry no quota rows

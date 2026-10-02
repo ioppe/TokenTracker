@@ -90,6 +90,67 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("8%")).toBeInTheDocument();
   });
 
+  const desktopAccount = (overrides = {}) => ({
+    configured: true,
+    metric: "quota-percent",
+    profile_id: "default",
+    profile_number: null,
+    cached_at: "2026-10-02T10:00:00Z",
+    stale: true,
+    five_hour: { utilization: 12, resets_at: null },
+    seven_day: { utilization: 30, resets_at: null },
+    ...overrides,
+  });
+
+  it("shows desktop account quota snapshots without a Claude Code login", () => {
+    render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount()] }} order={["claude"]} />);
+    expect(screen.getByText("Claude Desktop Default account")).toBeInTheDocument();
+    expect(screen.getByText(/Quota snapshot/)).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("30%")).toBeInTheDocument();
+    expect(screen.queryByText("Not connected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+  });
+
+  it("keeps live Claude Code and separate desktop accounts distinct", () => {
+    render(<UsageLimitsPanel claude={{
+      configured: true,
+      five_hour: { utilization: 42 },
+      desktop_accounts: [desktopAccount(), desktopAccount({ profile_id: ".claude1", profile_number: 1,
+        display_name: "Work", five_hour: { utilization: 80 }, seven_day: null })],
+    }} order={["claude"]} />);
+    expect(screen.getByText("Claude")).toBeInTheDocument();
+    expect(screen.getByText("Claude Desktop Work")).toBeInTheDocument();
+    expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("80%")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Claude Desktop Work/ }));
+    expect(screen.getByRole("button", { name: /Claude Desktop Work/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /Claude Desktop Default account/ })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("respects remaining mode, zero snapshots, numbered names and Claude visibility", () => {
+    const claude = { configured: false, desktop_accounts: [desktopAccount({ profile_id: ".claude2", profile_number: 2,
+      five_hour: { utilization: 0 }, seven_day: null })] };
+    const { rerender } = render(<UsageLimitsPanel claude={claude} order={["claude"]} displayMode="remaining" />);
+    expect(screen.getByText("Claude Desktop Account 2")).toBeInTheDocument();
+    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.queryByText("7d")).not.toBeInTheDocument();
+    rerender(createElement(UsageLimitsPanel, { claude, order: ["claude"], visibility: { claude: false } }));
+    expect(screen.queryByText("Claude Desktop Account 2")).not.toBeInTheDocument();
+  });
+
+  it("localizes desktop snapshots and does not invent a reset or pace projection", () => {
+    setCopyLocale(ZH_CN_LOCALE);
+    render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount()] }} order={["claude"]} />);
+    expect(screen.getByText("Claude 桌面端 默认账号")).toBeInTheDocument();
+    expect(screen.getByText(/额度快照/)).toBeInTheDocument();
+    const row = screen.getByRole("button", { name: /Claude 桌面端 默认账号/ });
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(row).toHaveAttribute("aria-expanded", "true");
+    expect(row.textContent).not.toMatch(/重置于|预计|Live/);
+  });
+
   it("renders Kimi quota windows and not-connected state", () => {
     const { rerender } = render(
       <UsageLimitsPanel

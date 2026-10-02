@@ -10,6 +10,14 @@ function expand(value, home) {
   return path.resolve(home, raw === "~" ? "" : raw.startsWith("~/") ? raw.slice(2) : raw);
 }
 
+function claudeDesktopDefaultRoot({ home = os.homedir(), env = process.env, platform = process.platform } = {}) {
+  return platform === "darwin"
+    ? path.join(home, "Library", "Application Support", "Claude")
+    : platform === "win32"
+      ? path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), "Claude")
+      : path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "Claude");
+}
+
 // Only known profile roots, never process arguments, cookies or auth files.
 // Numbered .claudeN directories are the isolated user-data-dir convention
 // used by account launchers such as CodexQuotaViewer.
@@ -20,11 +28,7 @@ function discoverClaudeDesktopProfiles({
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const statSync = deps.statSync || fs.statSync;
   const realpathSync = deps.realpathSync || fs.realpathSync;
-  const defaultRoot = platform === "darwin"
-    ? path.join(home, "Library", "Application Support", "Claude")
-    : platform === "win32"
-      ? path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), "Claude")
-      : path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "Claude");
+  const defaultRoot = claudeDesktopDefaultRoot({ home, env, platform });
   const candidates = [defaultRoot, expand(env.TOKENTRACKER_CLAUDE_DESKTOP_HOME, home)];
   try {
     const entries = readdirSync(home, { withFileTypes: true });
@@ -71,4 +75,4 @@ function claudeDesktopTranscriptDirs(profiles) {
   ]);
 }
 
-module.exports = { discoverClaudeDesktopProfiles, claudeDesktopTranscriptDirs };
+module.exports = { claudeDesktopDefaultRoot, discoverClaudeDesktopProfiles, claudeDesktopTranscriptDirs };

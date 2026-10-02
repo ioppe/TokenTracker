@@ -68,9 +68,24 @@ type CodexUsageLimits = {
   readonly reset_credits?: CodexResetCredits | null;
 };
 
+type ClaudeDesktopAccount = {
+  readonly configured: boolean;
+  readonly profile_id: string;
+  readonly profile_number: number | null;
+  readonly profile_name: string | null;
+  readonly display_name: string | null;
+  readonly is_selected: boolean;
+  readonly source: "local-history";
+  readonly metric: "quota-percent";
+  readonly cached_at: string;
+  readonly stale: boolean;
+  readonly five_hour: { utilization: number; resets_at: null } | null;
+  readonly seven_day: { utilization: number; resets_at: null } | null;
+};
+
 interface UsageLimitsData {
   fetched_at: string;
-  claude: { configured: boolean; error?: string | null; plan_label?: string | null; auth_action_required?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
+  claude: { configured: boolean; desktop_accounts?: readonly ClaudeDesktopAccount[]; error?: string | null; plan_label?: string | null; auth_action_required?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
   codex: CodexUsageLimits;
   cursor: { configured: boolean; error?: string | null; plan_label?: string | null; membership_type?: string | null; primary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null; quaternary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null };
   gemini: { configured: boolean; error?: string | null; plan_label?: string | null; account_email?: string | null; account_plan?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };

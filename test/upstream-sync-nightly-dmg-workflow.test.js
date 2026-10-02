@@ -65,3 +65,30 @@ test("scheduled runs skip redundant builds while manual runs can rebuild", () =>
     /github\.event_name == 'workflow_dispatch' \|\| needs\.sync\.outputs\.changed == 'true'/
   );
 });
+
+test("manual build-only mode skips upstream fetch, merge and release publication", () => {
+  const content = loadWorkflow();
+  assert.match(content, /build_only:[\s\S]*?default: false[\s\S]*?type: boolean/);
+  assert.match(content, /BUILD_ONLY: \$\{\{ \(github\.event_name == 'push' \|\| inputs\.build_only\) && 'true' \|\| 'false' \}\}/);
+  assert.match(content, /name: Fetch upstream\s+if: \$\{\{ github\.event_name != 'push' && !inputs\.build_only \}\}/);
+  assert.match(content, /if \[\[ "\$\{BUILD_ONLY\}" == "true" \]\]; then[\s\S]*?else\s+if ! git merge/);
+  assert.match(content, /if: \$\{\{ needs\.build\.result == 'success' && github\.event_name != 'push' && !inputs\.build_only \}\}/);
+});
+
+test("custom collector pushes build artifacts without merging or publishing", () => {
+  const content = loadWorkflow();
+  assert.match(content, /push:\s+branches: \[custom-collectors\]/);
+  assert.match(content, /ref: \$\{\{ github\.event_name == 'push' && github\.sha \|\| env\.TARGET_BRANCH \}\}/);
+  assert.match(content, /paths:[\s\S]*?- "src\/\*\*"[\s\S]*?- "dashboard\/\*\*"/);
+  assert.match(content, /if: \$\{\{ github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'/);
+});
+
+test("nightly builds verify desktop snapshots and native reset isolation", () => {
+  const content = loadWorkflow();
+  assert.match(content, /node-version: 24/);
+  assert.match(content, /node --test test\/claude-desktop-limits\.test\.js/);
+  assert.match(content, /UsageLimitsPanel\.test\.jsx/);
+  assert.match(content, /npm --prefix dashboard run typecheck/);
+  assert.match(content, /-only-testing:TokenTrackerBarTests\/UsageLimitsRetentionTests/);
+  assert.match(content, /-only-testing:TokenTrackerBarTests\/WeeklyLimitResetDetectorTests/);
+});

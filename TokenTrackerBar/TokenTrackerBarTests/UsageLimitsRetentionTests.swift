@@ -79,6 +79,47 @@ final class UsageLimitsRetentionTests: XCTestCase {
         XCTAssertFalse(response.hasAnyProviderWithoutError)
     }
 
+    func testDesktopQuotaDecodesWithoutClaudeCodeLoginAndKeepsItsSampleTime() throws {
+        let response = try decodeResponse(overrides: [
+            "claude": [
+                "configured": false,
+                "desktop_accounts": [[
+                    "configured": true, "profile_id": ".claude1", "profile_number": 1,
+                    "display_name": "Work", "metric": "quota-percent",
+                    "cached_at": "2026-10-02T10:00:00Z", "stale": true,
+                    "five_hour": ["utilization": 0.0],
+                    "seven_day": ["utilization": 40.0],
+                ]],
+            ],
+        ])
+        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
+        XCTAssertTrue(response.hasAnyProviderWithoutError)
+        XCTAssertFalse(response.claude.configured)
+        XCTAssertNil(response.claude.fiveHour)
+        XCTAssertEqual(account.profileNumber, 1)
+        XCTAssertEqual(account.displayName, "Work")
+        XCTAssertEqual(account.cachedAt, "2026-10-02T10:00:00Z")
+        XCTAssertTrue(account.stale)
+        XCTAssertEqual(account.fiveHour?.utilization, 0)
+        XCTAssertNil(account.fiveHour?.resetsAt)
+        let encoded = try JSONEncoder().encode(response)
+        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: encoded), response)
+    }
+
+    func testEmptyDesktopQuotaDoesNotCountAsUsableData() throws {
+        let response = try decodeResponse(overrides: [
+            "claude": ["configured": false, "desktop_accounts": [[
+                "configured": true, "profile_id": "default", "metric": "quota-percent",
+                "cached_at": "2026-10-02T10:00:00Z", "stale": true,
+            ]]],
+        ])
+        XCTAssertFalse(response.hasAnyProviderWithoutError)
+    }
+
+    func testOldClaudePayloadHasNoDesktopAccounts() throws {
+        XCTAssertNil(try decodeResponse().claude.desktopAccounts)
+    }
+
     func testAllConfiguredProvidersErroredHasNoUsableProvider() throws {
         let response = try decodeResponse(overrides: [
             "claude": ["configured": true, "error": "401 unauthorized"],

@@ -648,6 +648,55 @@ describe("getUsageLimits claude data-age fields (stale + cached_at)", () => {
   });
 });
 
+describe("getUsageLimits Claude Desktop quota snapshots", () => {
+  for (const withCliLogin of [false, true]) {
+    it(`keeps desktop history separate with Claude Code login=${withCliLogin}`, async () => {
+      resetUsageLimitsCache();
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-limits-desktop-"));
+      try {
+        const desktop = path.join(home, ".claude1");
+        fs.mkdirSync(desktop);
+        const sampleTime = Date.now() - 3_600_000;
+        fs.writeFileSync(path.join(desktop, "plan-usage-history.json"), JSON.stringify({ version: 2,
+          samples: [{ t: sampleTime, org: "desktop-org-private", u: { fh: 80, sd: 20 } }] }));
+        if (withCliLogin) {
+          fs.mkdirSync(path.join(home, ".claude"));
+          fs.writeFileSync(path.join(home, ".claude", ".credentials.json"), JSON.stringify({
+            claudeAiOauth: { accessToken: "test-cli-token" },
+          }));
+        }
+        const result = await getUsageLimits({
+          home, env: {}, platform: "linux", providerTimeoutMs: 1000,
+          securityRunner() { return { status: 1, stdout: "" }; },
+          commandRunner() { return { status: 1, stdout: "" }; },
+          fetchImpl(url) {
+            if (url === "https://api.anthropic.com/api/oauth/usage") return Promise.resolve({
+              ok: true, status: 200, headers: { get: () => null }, json: async () => ({
+                five_hour: { utilization: 7, resets_at: new Date(Date.now() + 3_600_000).toISOString() },
+              }),
+            });
+            return Promise.reject(new Error("unmocked"));
+          },
+        });
+        assert.equal(result.claude.configured, withCliLogin);
+        assert.equal(result.claude.five_hour?.utilization, withCliLogin ? 7 : undefined);
+        const [account] = result.claude.desktop_accounts;
+        assert.equal(account.profile_id, ".claude1");
+        assert.equal(account.five_hour.utilization, 80);
+        assert.equal(account.cached_at, new Date(sampleTime).toISOString());
+        assert.equal(account.stale, true);
+        assert.equal(account.provenance.confidence, "observed");
+        assert.equal(account.metric, "quota-percent");
+        assert.ok(!JSON.stringify(account).includes("desktop-org-private"));
+        assert.ok(!fs.existsSync(path.join(home, ".tokentracker", "tracker", "queue.jsonl")));
+      } finally {
+        resetUsageLimitsCache();
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 describe("getUsageLimits", () => {
   it("classifies a 5h session window into primary regardless of slot position", async () => {
     resetUsageLimitsCache();

@@ -9,6 +9,15 @@ name: upstream sync + nightly macOS DMG
 # branch containing the fork-specific collectors.
 
 on:
+  push:
+    branches: [custom-collectors]
+    paths:
+      - ".github/workflows/upstream-sync-nightly-dmg.yml"
+      - "src/**"
+      - "dashboard/**"
+      - "TokenTrackerBar/**"
+      - "test/**"
+      - "package*.json"
   schedule:
     # GitHub cron uses UTC. Run once per day at 03:15 UTC.
     - cron: "15 3 * * *"
@@ -24,6 +33,11 @@ on:
         required: false
         default: "main"
         type: string
+      build_only:
+        description: "Build current branch without merging upstream or publishing a release"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: upstream-sync-nightly-dmg
@@ -38,10 +52,11 @@ env:
   UPSTREAM_REPOSITORY: xiufengsun/TokenTracker
   TARGET_BRANCH: ${{ inputs.target_branch || 'custom-collectors' }}
   UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+  BUILD_ONLY: ${{ (github.event_name == 'push' || inputs.build_only) && 'true' || 'false' }}
 
 jobs:
   sync:
-    name: Sync upstream into fork branch
+    name: Prepare fork source
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.merge.outputs.changed }}
@@ -51,11 +66,12 @@ jobs:
       - name: Check out target branch
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.TARGET_BRANCH }}
+          ref: ${{ github.event_name == 'push' && github.sha || env.TARGET_BRANCH }}
           fetch-depth: 0
           persist-credentials: true
 
       - name: Fetch upstream
+        if: ${{ github.event_name != 'push' && !inputs.build_only }}
         run: |
           set -euo pipefail
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
@@ -65,7 +81,7 @@ jobs:
             exit 1
           fi
 
-      - name: Merge upstream without hiding conflicts
+      - name: Prepare source and optionally merge upstream
         id: merge
         run: |
           set -euo pipefail
@@ -73,13 +89,17 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           before_sha="$(git rev-parse HEAD)"
-          if ! git merge --no-edit "upstream/${UPSTREAM_REF}"; then
-            echo "::group::Conflicting files"
-            git diff --name-only --diff-filter=U || true
-            echo "::endgroup::"
-            git merge --abort || true
-            echo "::error title=Upstream merge conflict::Resolve the conflict in ${TARGET_BRANCH}, then rerun this workflow"
-            exit 1
+          if [[ "${BUILD_ONLY}" == "true" ]]; then
+            echo "Build-only mode: upstream merge and release publishing are disabled."
+          else
+            if ! git merge --no-edit "upstream/${UPSTREAM_REF}"; then
+              echo "::group::Conflicting files"
+              git diff --name-only --diff-filter=U || true
+              echo "::endgroup::"
+              git merge --abort || true
+              echo "::error title=Upstream merge conflict::Resolve the conflict in ${TARGET_BRANCH}, then rerun this workflow"
+              exit 1
+            fi
           fi
 
           after_sha="$(git rev-parse HEAD)"
@@ -106,9 +126,9 @@ jobs:
   build:
     name: Build nightly DMG
     needs: sync
-    # Scheduled runs build only when upstream advanced. Manual dispatch is a
-    # convenient way to rebuild the current fork branch on demand.
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.sync.outputs.changed == 'true' }}
+    # Scheduled runs build only when upstream advanced. Push builds and manual
+    # dispatches can verify the current fork branch without an upstream update.
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || needs.sync.outputs.changed == 'true' }}
     runs-on: macos-26
     steps:
       - name: Check out merged source
@@ -120,7 +140,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -136,6 +156,15 @@ jobs:
         run: |
           npm run validate:versions
           npm run validate:guardrails
+          npm run validate:copy
+          npm run validate:locale
+          npm run validate:ui-hardcode
+
+      - name: Test desktop quota collectors and dashboard
+        run: |
+          node --test test/claude-desktop-limits.test.js test/claude-desktop.test.js test/usage-limits.test.js test/usage-limits-singleflight.test.js test/limits-providers-parity.test.js test/upstream-sync-nightly-dmg-workflow.test.js
+          npm --prefix dashboard test -- src/ui/dashboard/components/UsageLimitsPanel.test.jsx src/hooks/use-usage-limits.test.ts src/pages/LimitsPage.test.jsx
+          npm --prefix dashboard run typecheck
 
       - name: Build dashboard
         env:
@@ -184,6 +213,15 @@ jobs:
             echo "::error::Nightly app is not universal; the x86_64 slice is missing"
             exit 1
           fi
+
+      - name: Test native quota retention and reset isolation
+        working-directory: TokenTrackerBar
+        run: |
+          xcodebuild test \
+            -scheme TokenTrackerBarTests \
+            -destination 'platform=macOS' \
+            -only-testing:TokenTrackerBarTests/UsageLimitsRetentionTests \
+            -only-testing:TokenTrackerBarTests/WeeklyLimitResetDetectorTests
 
       - name: Ad-hoc sign app
         working-directory: TokenTrackerBar
@@ -240,13 +278,17 @@ jobs:
             echo "- Source commit: \\`${{ needs.sync.outputs.head_sha }}\\`"
             echo "- Package version: \\`${{ needs.sync.outputs.version }}\\`"
             echo "- Artifact retention: 14 days"
-            echo "- Rolling GitHub prerelease: [nightly](https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly)"
+            if [[ "${BUILD_ONLY}" == "true" ]]; then
+              echo "- Build-only: no upstream merge or release publication"
+            else
+              echo "- Rolling GitHub prerelease: [nightly](https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly)"
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
   publish-nightly:
     name: Publish rolling nightly DMG release
     needs: [sync, build]
-    if: ${{ needs.build.result == 'success' }}
+    if: ${{ needs.build.result == 'success' && github.event_name != 'push' && !inputs.build_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
