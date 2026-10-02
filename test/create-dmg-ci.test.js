@@ -21,7 +21,7 @@ function fixture(t, { background = true, failure = 0 } = {}) {
   fs.copyFileSync(path.join(__dirname, "..", "TokenTrackerBar", "scripts", "create-dmg.sh"),
     path.join(scripts, "create-dmg.sh"));
   if (background) fs.writeFileSync(path.join(scripts, "dmg-background.png"), "background-fixture");
-  fs.writeFileSync(path.join(bin, "create-dmg"), `#!/usr/bin/env node
+  fs.writeFileSync(path.join(bin, "create-dmg"), `#!${process.execPath}
 const fs = require("node:fs");
 const path = require("node:path");
 const args = process.argv.slice(2);
