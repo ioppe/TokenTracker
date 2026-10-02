@@ -1,14 +1,24 @@
-name: upstream sync + nightly macOS DMG
+name: upstream sync + custom-collectors macOS DMG
 
 # This workflow is intentionally separate from release-dmg.yml. It keeps the
 # fork's custom branch current, produces a short-lived Actions artifact, and
-# updates one rolling GitHub prerelease for convenient DMG downloads.
+# publishes a versioned GitHub prerelease for the custom collector channel.
 #
 # Keep this file on the fork's default `main` branch so GitHub's scheduled
 # trigger can run it. The build itself checks out TARGET_BRANCH, which is the
 # branch containing the fork-specific collectors.
 
 on:
+  push:
+    branches: [custom-collectors]
+    paths:
+      - ".github/workflows/upstream-sync-nightly-dmg.yml"
+      - "src/**"
+      - "dashboard/**"
+      - "TokenTrackerBar/**"
+      - "scripts/**"
+      - "test/**"
+      - "package*.json"
   schedule:
     # GitHub cron uses UTC. Run once per day at 03:15 UTC.
     - cron: "15 3 * * *"
@@ -24,6 +34,11 @@ on:
         required: false
         default: "main"
         type: string
+      build_only:
+        description: "Build current branch without merging upstream or publishing a release"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: upstream-sync-nightly-dmg
@@ -38,24 +53,29 @@ env:
   UPSTREAM_REPOSITORY: xiufengsun/TokenTracker
   TARGET_BRANCH: ${{ inputs.target_branch || 'custom-collectors' }}
   UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+  BUILD_ONLY: ${{ (github.event_name == 'push' || inputs.build_only) && 'true' || 'false' }}
+  CUSTOM_CHANNEL_SUFFIX: custom-collectors
 
 jobs:
   sync:
-    name: Sync upstream into fork branch
+    name: Prepare fork source
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.merge.outputs.changed }}
       head_sha: ${{ steps.merge.outputs.head_sha }}
       version: ${{ steps.merge.outputs.version }}
+      channel_version: ${{ steps.merge.outputs.channel_version }}
+      release_tag: ${{ steps.merge.outputs.release_tag }}
     steps:
       - name: Check out target branch
         uses: actions/checkout@v7
         with:
-          ref: ${{ env.TARGET_BRANCH }}
+          ref: ${{ github.event_name == 'push' && github.sha || env.TARGET_BRANCH }}
           fetch-depth: 0
           persist-credentials: true
 
       - name: Fetch upstream
+        if: ${{ github.event_name != 'push' && !inputs.build_only }}
         run: |
           set -euo pipefail
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
@@ -65,7 +85,7 @@ jobs:
             exit 1
           fi
 
-      - name: Merge upstream without hiding conflicts
+      - name: Prepare source and optionally merge upstream
         id: merge
         run: |
           set -euo pipefail
@@ -73,13 +93,36 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           before_sha="$(git rev-parse HEAD)"
-          if ! git merge --no-edit "upstream/${UPSTREAM_REF}"; then
-            echo "::group::Conflicting files"
-            git diff --name-only --diff-filter=U || true
-            echo "::endgroup::"
-            git merge --abort || true
-            echo "::error title=Upstream merge conflict::Resolve the conflict in ${TARGET_BRANCH}, then rerun this workflow"
-            exit 1
+          upstream_version=""
+          if [[ "${BUILD_ONLY}" == "true" ]]; then
+            echo "Build-only mode: upstream merge and release publishing are disabled."
+          else
+            if ! git merge --no-edit "upstream/${UPSTREAM_REF}"; then
+              echo "::group::Conflicting files"
+              git diff --name-only --diff-filter=U || true
+              echo "::endgroup::"
+              git merge --abort || true
+              echo "::error title=Upstream merge conflict::Resolve the conflict in ${TARGET_BRANCH}, then rerun this workflow"
+              exit 1
+            fi
+
+            upstream_version="$(git show --format= "upstream/${UPSTREAM_REF}:package.json" | node -e '
+              let input = "";
+              process.stdin.on("data", (chunk) => { input += chunk; });
+              process.stdin.on("end", () => {
+                const version = JSON.parse(input).version;
+                if (typeof version !== "string" || version.length === 0) process.exit(1);
+                process.stdout.write(version);
+              });
+            ')"
+            node -e "require('./scripts/version-files.cjs').assertReleaseVersion(process.argv[1], 'Upstream release version')" "${upstream_version}"
+            node scripts/align-release-version.cjs "${upstream_version}"
+          fi
+
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add -u
+            git commit -m "chore: align custom-collectors with upstream v${upstream_version:-$(node -p "require('./package.json').version")}" \
+              --no-verify
           fi
 
           after_sha="$(git rev-parse HEAD)"
@@ -88,27 +131,35 @@ jobs:
             changed=true
             git push origin "HEAD:${TARGET_BRANCH}"
           else
-            echo "Upstream is already up to date."
+            echo "Upstream and release versions are already up to date."
           fi
 
           version="$(node -p "require('./package.json').version")"
+          upstream_version="${upstream_version:-${version}}"
+          channel_version="${version}-${CUSTOM_CHANNEL_SUFFIX}"
+          release_tag="v${channel_version}"
           {
             echo "changed=${changed}"
             echo "head_sha=${after_sha}"
             echo "version=${version}"
+            echo "upstream_version=${upstream_version}"
+            echo "channel_version=${channel_version}"
+            echo "release_tag=${release_tag}"
           } >> "${GITHUB_OUTPUT}"
 
           echo "Target branch: ${TARGET_BRANCH}"
           echo "Upstream: ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF}"
           echo "Source commit: ${after_sha}"
+          echo "Upstream release version: ${upstream_version}"
           echo "Package version: ${version}"
+          echo "Custom channel version: ${channel_version}"
 
   build:
-    name: Build nightly DMG
+    name: Build custom-collectors DMG
     needs: sync
-    # Scheduled runs build only when upstream advanced. Manual dispatch is a
-    # convenient way to rebuild the current fork branch on demand.
-    if: ${{ github.event_name == 'workflow_dispatch' || needs.sync.outputs.changed == 'true' }}
+    # Scheduled runs build only when upstream advanced. Push builds and manual
+    # dispatches can verify the current fork branch without an upstream update.
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || needs.sync.outputs.changed == 'true' }}
     runs-on: macos-26
     steps:
       - name: Check out merged source
@@ -120,7 +171,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -136,6 +187,15 @@ jobs:
         run: |
           npm run validate:versions
           npm run validate:guardrails
+          npm run validate:copy
+          npm run validate:locale
+          npm run validate:ui-hardcode
+
+      - name: Test desktop quota collectors and dashboard
+        run: |
+          node --test test/claude-desktop-limits.test.js test/claude-desktop.test.js test/usage-limits.test.js test/usage-limits-singleflight.test.js test/limits-providers-parity.test.js test/upstream-sync-nightly-dmg-workflow.test.js test/create-dmg-ci.test.js
+          npm --prefix dashboard test -- src/ui/dashboard/components/UsageLimitsPanel.test.jsx src/hooks/use-usage-limits.test.ts src/pages/LimitsPage.test.jsx
+          npm --prefix dashboard run typecheck
 
       - name: Build dashboard
         env:
@@ -181,9 +241,18 @@ jobs:
           APP_BIN="$(find build/DerivedData/Build/Products/Release -name 'TokenTracker' -path '*/MacOS/*' -maxdepth 5)"
           lipo -info "${APP_BIN}"
           if ! lipo -info "${APP_BIN}" 2>&1 | grep -q "x86_64"; then
-            echo "::error::Nightly app is not universal; the x86_64 slice is missing"
+            echo "::error::Custom channel app is not universal; the x86_64 slice is missing"
             exit 1
           fi
+
+      - name: Test native quota retention and reset isolation
+        working-directory: TokenTrackerBar
+        run: |
+          xcodebuild test \
+            -scheme TokenTrackerBarTests \
+            -destination 'platform=macOS' \
+            -only-testing:TokenTrackerBarTests/UsageLimitsRetentionTests \
+            -only-testing:TokenTrackerBarTests/WeeklyLimitResetDetectorTests
 
       - name: Ad-hoc sign app
         working-directory: TokenTrackerBar
@@ -220,76 +289,97 @@ jobs:
         env:
           CI: "true"
         run: |
+          set -euo pipefail
           APP_PATH="$(find build/DerivedData/Build/Products/Release -name 'TokenTracker.app' -maxdepth 1)"
-          bash scripts/create-dmg.sh "${APP_PATH}"
+          log="${RUNNER_TEMP}/tokentracker-create-dmg.log"
+          if bash scripts/create-dmg.sh "${APP_PATH}" > "${log}" 2>&1; then
+            cat "${log}"
+          else
+            cat "${log}"
+            details="$(tail -n 40 "${log}")"
+            details="${details//'%'/'%25'}"
+            details="${details//$'\r'/'%0D'}"
+            details="${details//$'\n'/'%0A'}"
+            echo "::error title=DMG packaging failed::${details}"
+            exit 1
+          fi
+          mv build/TokenTrackerBar.dmg "build/TokenTrackerBar-${{ needs.sync.outputs.channel_version }}.dmg"
 
-      - name: Upload nightly DMG artifact
+      - name: Upload custom-collectors DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: TokenTrackerBar-dmg-${{ needs.sync.outputs.version }}-${{ needs.sync.outputs.head_sha }}
-          path: TokenTrackerBar/build/TokenTrackerBar.dmg
+          name: TokenTrackerBar-dmg-${{ needs.sync.outputs.channel_version }}-${{ needs.sync.outputs.head_sha }}
+          path: TokenTrackerBar/build/TokenTrackerBar-${{ needs.sync.outputs.channel_version }}.dmg
           if-no-files-found: error
           retention-days: 14
 
       - name: Write build summary
         run: |
           {
-            echo "### Nightly DMG"
+            echo "### custom-collectors DMG"
             echo ""
             echo "- Source branch: \\`${TARGET_BRANCH}\\`"
             echo "- Source commit: \\`${{ needs.sync.outputs.head_sha }}\\`"
-            echo "- Package version: \\`${{ needs.sync.outputs.version }}\\`"
+            echo "- Upstream release version: \\`${{ needs.sync.outputs.version }}\\`"
+            echo "- Custom channel version: \\`${{ needs.sync.outputs.channel_version }}\\`"
             echo "- Artifact retention: 14 days"
-            echo "- Rolling GitHub prerelease: [nightly](https://github.com/${GITHUB_REPOSITORY}/releases/tag/nightly)"
+            if [[ "${BUILD_ONLY}" == "true" ]]; then
+              echo "- Build-only: no upstream merge or prerelease publication"
+            else
+              echo "- GitHub prerelease: [${{ needs.sync.outputs.release_tag }}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ needs.sync.outputs.release_tag }})"
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  publish-nightly:
-    name: Publish rolling nightly DMG release
+  publish-custom-collectors:
+    name: Publish custom-collectors DMG release
     needs: [sync, build]
-    if: ${{ needs.build.result == 'success' }}
+    if: ${{ needs.build.result == 'success' && github.event_name != 'push' && !inputs.build_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download nightly DMG artifact
+      - name: Download custom-collectors DMG artifact
         uses: actions/download-artifact@v4
         with:
-          name: TokenTrackerBar-dmg-${{ needs.sync.outputs.version }}-${{ needs.sync.outputs.head_sha }}
+          name: TokenTrackerBar-dmg-${{ needs.sync.outputs.channel_version }}-${{ needs.sync.outputs.head_sha }}
           path: release-assets
 
-      - name: Publish rolling nightly release
+      - name: Publish versioned custom-collectors release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.sync.outputs.version }}
+          CHANNEL_VERSION: ${{ needs.sync.outputs.channel_version }}
+          RELEASE_TAG: ${{ needs.sync.outputs.release_tag }}
           HEAD_SHA: ${{ needs.sync.outputs.head_sha }}
           TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
         run: |
           set -euo pipefail
-          tag="nightly"
-          asset="release-assets/TokenTrackerBar.dmg"
+          tag="$RELEASE_TAG"
+          asset="release-assets/TokenTrackerBar-${CHANNEL_VERSION}.dmg"
           test -f "$asset"
 
           notes="$(mktemp)"
           {
-            echo "Nightly macOS DMG built from the fork's custom collectors branch."
+            echo "Custom macOS DMG built from the fork's custom collectors branch."
             echo
             echo "- Source branch: \`$TARGET_BRANCH\`"
             echo "- Source commit: \`$HEAD_SHA\`"
-            echo "- Package version: \`$VERSION\`"
-            echo "- This rolling prerelease is replaced by the next successful build."
+            echo "- Upstream release version: \`$VERSION\`"
+            echo "- Custom channel version: \`$CHANNEL_VERSION\`"
+            echo "- Platform metadata keeps the stable upstream version; the suffix identifies this custom channel."
           } > "$notes"
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$tag" "$asset" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$tag" \
-              --title "Nightly DMG" \
+              --title "TokenTracker $CHANNEL_VERSION" \
               --notes-file "$notes" \
               --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$tag" "$asset" \
               --target "$HEAD_SHA" \
               --prerelease \
-              --title "Nightly DMG" \
+              --title "TokenTracker $CHANNEL_VERSION" \
               --notes-file "$notes" \
               --repo "$GITHUB_REPOSITORY"
           fi
