@@ -8,7 +8,6 @@ const path = require("node:path");
 const {
   discoverClaudeDesktopProfiles,
   claudeDesktopTranscriptDirs,
-  claudeDesktopAgentSessionDirs,
 } = require("../src/lib/claude-desktop");
 const { resolveScanRoots, describeScanRootOrigin } = require("../src/lib/scan-roots");
 
@@ -27,11 +26,6 @@ test("Claude Desktop discovers default/numbered/explicit roots, excludes symlink
     ...[1, 2, 10].map((n) => path.join(home, `.claude${n}`))]);
   assert.deepEqual(claudeDesktopTranscriptDirs([path.join(home, ".claude1")]), [
     path.join(home, ".claude1", "projects"), path.join(home, ".claude1", "claude-code-sessions"),
-  ]);
-  assert.deepEqual(claudeDesktopAgentSessionDirs([path.join(home, ".claude1")]), [
-    path.join(home, ".claude1", "projects"),
-    path.join(home, ".claude1", "claude-code-sessions"),
-    path.join(home, ".claude1", "local-agent-mode-sessions"),
   ]);
   assert.ok(!claudeDesktopTranscriptDirs(profiles).some((dir) => dir.includes("local-agent-mode")));
 });

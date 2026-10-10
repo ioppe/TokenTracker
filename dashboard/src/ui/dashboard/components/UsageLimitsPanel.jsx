@@ -3,10 +3,6 @@ import { Clock as ClockIcon, Infinity as InfinityIcon } from "lucide-react";
 import { Card } from "../../components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy, getCopyLocale } from "../../../lib/copy";
-import {
-  desktopAccountName, desktopTokenUsageText, hasDesktopQuota, hasDesktopTokenData,
-  desktopQuotaLabel, desktopQuotaRefreshText,
-} from "../../../lib/claude-desktop-display.js";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
 import {
   LIMIT_PROVIDER_IDS,
@@ -1227,14 +1223,10 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
   // entered by hand — that data keeps its row regardless of visibility prefs.
   const groups = effectiveOrder
     .filter((id) => !visibility || visibility[id] !== false || subscriptionByProvider.has(id))
-    .flatMap((id) => {
+    .map((id) => {
       const hideQuota = hiddenQuotaProviderSet.has(id);
-      const desktopAccounts = id === "claude" && Array.isArray(claude?.desktop_accounts)
-        ? claude.desktop_accounts.filter((account) => account?.configured
-          && (hasDesktopQuota(account) || hasDesktopTokenData(account)))
-        : [];
       const subscription = subscriptionByProvider.get(id) || null;
-      const provider = hideQuota
+      return hideQuota
         ? subscription
           ? renderUnlinkedProvider(
             id,
@@ -1246,9 +1238,7 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
             effectiveMode,
           )
           : null
-        : !dataById[id]?.configured && desktopAccounts.length > 0 && !subscription
-          ? null
-          : renderProviderGroup(
+        : renderProviderGroup(
             id,
             dataById[id],
             effectiveMode,
@@ -1257,41 +1247,6 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
             subscription,
             now,
           );
-      return [provider, ...desktopAccounts.map((account) => {
-        const key = `claude-desktop:${account.profile_id}`;
-        const title = copy("limits.claude_desktop.title", { account: desktopAccountName(account) });
-        const tokenText = desktopTokenUsageText(account)
-          || (hideQuota ? copy("limits.claude_desktop.token_usage_unavailable") : null);
-        const sampledAt = formatExactReset(Date.parse(account.cached_at));
-        const tokenStatus = account.token_usage_status;
-        const usageObserved = tokenStatus === "observed";
-        const usageUnavailable = tokenStatus === "unavailable";
-        const usagePartial = tokenStatus === "partial";
-        const hasTokenStatus = usageObserved || usageUnavailable || usagePartial;
-        const hasQuota = !hideQuota && hasDesktopQuota(account);
-        const badge = <StatusBadge
-          label={hasQuota ? desktopQuotaLabel(account)
-            : copy("limits.claude_desktop.token_usage_badge")}
-          age={ago(hasQuota ? account.cached_at : account.token_usage_captured_at)}
-          tone={hasQuota ? account.stale ? "stale" : "cached"
-            : usageObserved ? "cached" : hasTokenStatus ? "stale" : "cached"}
-          tooltip={hasQuota && sampledAt
-            ? copy("limits.claude_desktop.sampled_at", { time: sampledAt }) : null}
-        />;
-        const refreshError = hideQuota ? null : desktopQuotaRefreshText(account);
-        const tokenExtra = React.createElement(React.Fragment, null,
-          tokenText ? React.createElement(StatusLine, null, tokenText) : null,
-          refreshError ? React.createElement(StatusLine, null, refreshError) : null);
-        return renderConfiguredProvider(
-          "claude", hideQuota ? {
-            ...account, five_hour: null, seven_day: null,
-            seven_day_opus: null, weekly_scoped: [], extra_usage: null,
-          } : account, title, effectiveMode, expandedId === key,
-          () => setExpandedId((prev) => prev === key ? null : key),
-          badge, null, now, key,
-          tokenExtra,
-        );
-      })];
     })
     .filter(Boolean);
 

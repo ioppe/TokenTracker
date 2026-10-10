@@ -648,9 +648,9 @@ describe("getUsageLimits claude data-age fields (stale + cached_at)", () => {
   });
 });
 
-describe("getUsageLimits Claude Desktop quota snapshots", () => {
+describe("getUsageLimits removed Claude Desktop account feature", () => {
   for (const withCliLogin of [false, true]) {
-    it(`keeps desktop history separate with Claude Code login=${withCliLogin}`, async () => {
+    it(`ignores desktop history with Claude Code login=${withCliLogin}`, async () => {
       resetUsageLimitsCache();
       const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-limits-desktop-"));
       try {
@@ -680,14 +680,8 @@ describe("getUsageLimits Claude Desktop quota snapshots", () => {
         });
         assert.equal(result.claude.configured, withCliLogin);
         assert.equal(result.claude.five_hour?.utilization, withCliLogin ? 7 : undefined);
-        const [account] = result.claude.desktop_accounts;
-        assert.equal(account.profile_id, ".claude1");
-        assert.equal(account.five_hour.utilization, 80);
-        assert.equal(account.cached_at, new Date(sampleTime).toISOString());
-        assert.equal(account.stale, true);
-        assert.equal(account.provenance.confidence, "observed");
-        assert.equal(account.metric, "quota-percent");
-        assert.ok(!JSON.stringify(account).includes("desktop-org-private"));
+        assert.equal(Object.hasOwn(result.claude, "desktop_accounts"), false);
+        assert.ok(!JSON.stringify(result).includes("desktop-org-private"));
         assert.ok(!fs.existsSync(path.join(home, ".tokentracker", "tracker", "queue.jsonl")));
       } finally {
         resetUsageLimitsCache();
@@ -696,7 +690,7 @@ describe("getUsageLimits Claude Desktop quota snapshots", () => {
     });
   }
 
-  it("exposes local Agent usage in the public limits payload", async () => {
+  it("does not expose local Agent account diagnostics in the limits payload", async () => {
     resetUsageLimitsCache();
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "tt-limits-desktop-agent-"));
     try {
@@ -718,14 +712,9 @@ describe("getUsageLimits Claude Desktop quota snapshots", () => {
         commandRunner() { return { status: 1, stdout: "" }; },
         fetchImpl() { return Promise.reject(new Error("unmocked")); },
       });
-      const [account] = result.claude.desktop_accounts;
-      assert.equal(account.profile_id, ".claude1");
-      assert.equal(account.metric, "token-usage");
-      assert.equal(account.token_usage_status, "observed");
-      assert.equal(account.token_usage.total_tokens, 12);
-      assert.equal(account.token_usage.messages, 1);
-      assert.equal(account.five_hour, null);
-      assert.equal(account.seven_day, null);
+      assert.equal(Object.hasOwn(result.claude, "desktop_accounts"), false);
+      assert.equal(result.claude.configured, false);
+      assert.ok(!fs.existsSync(path.join(home, ".tokentracker", "tracker", "queue.jsonl")));
     } finally {
       resetUsageLimitsCache();
       fs.rmSync(home, { recursive: true, force: true });

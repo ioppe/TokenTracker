@@ -102,17 +102,7 @@ describe("UsageLimitsPanel", () => {
     ...overrides,
   });
 
-  it("shows desktop account quota snapshots without a Claude Code login", () => {
-    render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount()] }} order={["claude"]} />);
-    expect(screen.getByText("Claude Desktop Default account")).toBeInTheDocument();
-    expect(screen.getByText(/Quota snapshot/)).toBeInTheDocument();
-    expect(screen.getByText("12%")).toBeInTheDocument();
-    expect(screen.getByText("30%")).toBeInTheDocument();
-    expect(screen.queryByText("Not connected")).not.toBeInTheDocument();
-    expect(screen.queryByText("Live")).not.toBeInTheDocument();
-  });
-
-  it("keeps live Claude Code and separate desktop accounts distinct", () => {
+  it("ignores legacy Desktop account records while preserving ordinary provider data", () => {
     render(<UsageLimitsPanel claude={{
       configured: true,
       five_hour: { utilization: 42 },
@@ -120,16 +110,13 @@ describe("UsageLimitsPanel", () => {
         display_name: "Work", five_hour: { utilization: 80 }, seven_day: null })],
     }} order={["claude"]} />);
     expect(screen.getByText("Claude")).toBeInTheDocument();
-    expect(screen.getByText("Claude Desktop Work")).toBeInTheDocument();
+    expect(screen.queryByText(/Claude Desktop/)).not.toBeInTheDocument();
     expect(screen.getByText("42%")).toBeInTheDocument();
-    expect(screen.getByText("12%")).toBeInTheDocument();
-    expect(screen.getByText("80%")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Claude Desktop Work/ }));
-    expect(screen.getByRole("button", { name: /Claude Desktop Work/ })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: /Claude Desktop Default account/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("12%")).not.toBeInTheDocument();
+    expect(screen.queryByText("80%")).not.toBeInTheDocument();
   });
 
-  it("hides unverified Claude Code and Codex quota rows while keeping Claude Desktop rows", () => {
+  it("hides Claude Code, Codex quotas and legacy Desktop account rows", () => {
     render(
       <UsageLimitsPanel
         claude={{
@@ -148,8 +135,8 @@ describe("UsageLimitsPanel", () => {
 
     expect(screen.queryByText("Claude", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("Codex", { exact: true })).not.toBeInTheDocument();
-    expect(screen.getByText("Claude Desktop Default account")).toBeInTheDocument();
-    expect(screen.getByText("Token usage unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/Claude Desktop/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Token usage unavailable")).not.toBeInTheDocument();
     expect(screen.queryByText("12%")).not.toBeInTheDocument();
     expect(screen.queryByText("30%")).not.toBeInTheDocument();
     expect(screen.queryByText(/Quota snapshot|Quota sampled/)).not.toBeInTheDocument();
@@ -157,7 +144,7 @@ describe("UsageLimitsPanel", () => {
     expect(screen.queryByText("28%")).not.toBeInTheDocument();
   });
 
-  it("keeps measured desktop tokens and API estimates when provider quotas are hidden", () => {
+  it("does not revive removed Desktop account rows from cached measured usage", () => {
     render(<UsageLimitsPanel
       claude={{ configured: true, desktop_accounts: [desktopAccount({
         token_usage_status: "observed",
@@ -166,34 +153,12 @@ describe("UsageLimitsPanel", () => {
       order={["claude"]}
       hiddenQuotaProviders={["claude", "codex"]}
     />);
-    expect(screen.getByText(/120 tokens.*API est\./)).toBeInTheDocument();
+    expect(screen.queryByText(/120 tokens.*API est\./)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Claude Desktop/)).not.toBeInTheDocument();
     expect(screen.queryByText(/12%|30%|Quota snapshot/)).not.toBeInTheDocument();
   });
 
-  it("shows observed Code/Cowork token usage and an API estimate when priced", () => {
-    render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount({
-      metric: "token-usage",
-      five_hour: null,
-      seven_day: null,
-      token_usage_status: "observed",
-      token_usage_captured_at: "2026-10-02T11:00:00Z",
-      token_usage: {
-        input_tokens: 150,
-        cache_read_input_tokens: 20,
-        cache_creation_input_tokens: 0,
-        output_tokens: 12,
-        total_tokens: 182,
-        messages: 2,
-        estimated_cost_usd: 0.012345,
-        estimated_cost_status: "complete",
-      },
-    })] }} order={["claude"]} />);
-    expect(screen.getByText("Claude Desktop Default account")).toBeInTheDocument();
-    expect(screen.getByText(/182 tokens \| in 150 \| out 12/)).toBeInTheDocument();
-    expect(screen.getByText(/API est\. \$0\.012345/)).toBeInTheDocument();
-  });
-
-  it("shows an explicit unavailable state when a desktop session has no usage fields", () => {
+  it("omits unavailable Desktop accounts from old cached responses", () => {
     render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount({
       metric: "token-usage",
       five_hour: null,
@@ -201,31 +166,8 @@ describe("UsageLimitsPanel", () => {
       token_usage_status: "unavailable",
       token_usage: null,
     })] }} order={["claude"]} />);
-    expect(screen.getByText("Token usage unavailable")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Claude Desktop Default account/ }).textContent)
-      .toContain("Token usage");
-  });
-
-  it("respects remaining mode, zero snapshots, numbered names and Claude visibility", () => {
-    const claude = { configured: false, desktop_accounts: [desktopAccount({ profile_id: ".claude2", profile_number: 2,
-      five_hour: { utilization: 0 }, seven_day: null })] };
-    const { rerender } = render(<UsageLimitsPanel claude={claude} order={["claude"]} displayMode="remaining" />);
-    expect(screen.getByText("Claude Desktop Account 2")).toBeInTheDocument();
-    expect(screen.getByText("100%")).toBeInTheDocument();
-    expect(screen.queryByText("7d")).not.toBeInTheDocument();
-    rerender(createElement(UsageLimitsPanel, { claude, order: ["claude"], visibility: { claude: false } }));
-    expect(screen.queryByText("Claude Desktop Account 2")).not.toBeInTheDocument();
-  });
-
-  it("localizes desktop snapshots and does not invent a reset or pace projection", () => {
-    setCopyLocale(ZH_CN_LOCALE);
-    render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount()] }} order={["claude"]} />);
-    expect(screen.getByText("Claude 桌面端 默认账号")).toBeInTheDocument();
-    expect(screen.getByText(/额度快照/)).toBeInTheDocument();
-    const row = screen.getByRole("button", { name: /Claude 桌面端 默认账号/ });
-    fireEvent.keyDown(row, { key: "Enter" });
-    expect(row).toHaveAttribute("aria-expanded", "true");
-    expect(row.textContent).not.toMatch(/重置于|预计|Live/);
+    expect(screen.queryByText("Token usage unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Claude Desktop/)).not.toBeInTheDocument();
   });
 
   it("renders Kimi quota windows and not-connected state", () => {

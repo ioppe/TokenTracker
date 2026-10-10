@@ -93,15 +93,17 @@ test("custom collector pushes build artifacts and publishes the current prerelea
   assert.match(content, /--target "\$HEAD_SHA"/);
 });
 
-test("custom builds verify desktop snapshots and native reset isolation", () => {
+test("custom builds verify token collectors, local-log removal and native reset isolation", () => {
   const content = loadWorkflow();
   assert.match(content, /node-version: 24/);
-  assert.match(content, /node --test [^\n]*test\/claude-desktop-limits\.test\.js/);
-  assert.match(content, /node --test [^\n]*test\/claude-desktop-live\.test\.js/);
+  assert.match(content, /node --test [^\n]*test\/desktop-collectors-sync\.test\.js/);
+  assert.doesNotMatch(content, /claude-desktop-(?:limits|live)\.test\.js|ClaudeDesktopCollectionStatus/);
   assert.match(content, /UsageLimitsPanel\.test\.jsx/);
+  assert.match(content, /UsageOverview\.test\.jsx/);
   assert.match(content, /npm --prefix dashboard run typecheck/);
   assert.match(content, /-only-testing:TokenTrackerBarTests\/UsageLimitsRetentionTests/);
   assert.match(content, /-only-testing:TokenTrackerBarTests\/WeeklyLimitResetDetectorTests/);
+  assert.match(content, /-only-testing:TokenTrackerBarTests\/LimitsSettingsStoreTests/);
   assert.match(content, /test\/create-dmg-ci\.test\.js/);
   assert.match(content, /::error title=DMG packaging failed::/);
 });

@@ -36,7 +36,6 @@ const { fetchQoderLimits, fetchQoderCnLimits } = require("./qoder-limits");
 const { fetchArkCodingPlanLimits } = require("./ark-coding-plan-limits");
 const { fetchArkAgentPlanLimits } = require("./ark-agent-plan-limits");
 const { fetchProviderServiceStatus } = require("./provider-status");
-const { readClaudeDesktopUsageLimits } = require("./claude-desktop-limits");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
 const {
   runCommand,
@@ -3791,7 +3790,6 @@ async function fetchUsageLimitsUncached({
 } = {}) {
   const nowMs = Date.now();
 
-  const claudeDesktopAccountsPromise = readClaudeDesktopUsageLimits({ home, env, platform, nowMs, fetchImpl, securityRunner, forceRefresh });
   const [claudeOauth, claudeSubscription, codexAuth] = await Promise.all([
     Promise.resolve().then(() => readClaudeCodeOauthToken({ platform, securityRunner, home, nowMs })),
     Promise.resolve().then(() => detectClaudeCodeSubscriptionDetails({ platform, securityRunner, home })),
@@ -4200,13 +4198,9 @@ async function fetchUsageLimitsUncached({
       : { configured: true, error: reason?.message || "Unknown error" };
   }
 
-  const claudeDesktopAccounts = await claudeDesktopAccountsPromise;
   const data = {
     fetched_at: new Date(nowMs).toISOString(),
-    claude: {
-      ...withPlanLabel(claude, claudePlanType, "Claude"),
-      ...(claudeDesktopAccounts.length > 0 ? { desktop_accounts: claudeDesktopAccounts } : {}),
-    },
+    claude: withPlanLabel(claude, claudePlanType, "Claude"),
     codex: withPlanLabel(codex, codex.plan_type, "Codex"),
     cursor: withPlanLabel(cursor, cursor.membership_type, "Cursor"),
     // Kimi's subType (TYPE_PURCHASE/TYPE_EVENT) is the credit *source*, not a plan

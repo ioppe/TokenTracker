@@ -18,6 +18,29 @@ vi.mock("../../../../hooks/useTheme.js", () => ({
 }));
 
 describe("UsageOverview", () => {
+  it("does not render the removed Desktop local-log feature from legacy props", () => {
+    render(
+      <UsageOverview
+        period="day"
+        periods={[]}
+        summaryLabel="Total"
+        summaryValue="123"
+        desktopAccounts={[{
+          configured: true, profile_id: ".claude1", display_name: "Work",
+          token_usage_status: "unavailable",
+        }]}
+        fleetData={[{
+          source: "claude", label: "CLAUDE", totalPercent: "100.0", usage: 123,
+          models: [{ id: "claude-sonnet-4", name: "claude-sonnet-4", usage: 123, share: 100 }],
+        }]}
+      />,
+    );
+
+    expect(screen.queryByText(/Claude Desktop|Token usage unavailable|local logs/i)).toBeNull();
+    expect(screen.getByText("CLAUDE")).toBeVisible();
+    expect(document.querySelector("[data-counter-root]")).toHaveTextContent("123");
+  });
+
   it("shows stable hero and provider skeletons while a new range has no matching data", () => {
     render(
       <UsageOverview

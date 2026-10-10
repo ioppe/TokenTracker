@@ -68,87 +68,9 @@ type CodexUsageLimits = {
   readonly reset_credits?: CodexResetCredits | null;
 };
 
-type ClaudeDesktopTokenUsageModel = {
-  readonly model: string;
-  readonly input_tokens: number;
-  readonly cache_read_input_tokens: number;
-  readonly cache_creation_input_tokens: number;
-  readonly output_tokens: number;
-  readonly total_tokens: number;
-  readonly estimated_cost_usd: number | null;
-};
-
-type ClaudeDesktopTokenUsage = {
-  readonly input_tokens: number;
-  readonly cache_read_input_tokens: number;
-  readonly cache_creation_input_tokens: number;
-  readonly output_tokens: number;
-  readonly total_tokens: number;
-  readonly messages: number;
-  readonly observed_events?: number;
-  readonly models?: readonly ClaudeDesktopTokenUsageModel[];
-  readonly estimated_cost_usd: number | null;
-  readonly estimated_cost_status: "complete" | "partial" | "unavailable";
-  readonly aggregation?: {
-    readonly mode: "per-event" | "cumulative-delta" | "mixed" | "ambiguous";
-    readonly confidence: "observed" | "ambiguous";
-    readonly sessions: number;
-    readonly observed_events: number;
-    readonly cumulative_snapshots: number;
-    readonly cumulative_events_counted: number;
-    readonly cumulative_unchanged: number;
-    readonly cumulative_resets: number;
-    readonly ambiguous_events: number;
-  };
-  readonly scan_stats?: {
-    readonly files_discovered: number;
-    readonly files_scanned: number;
-    readonly files_reused: number;
-    readonly files_incremental: number;
-    readonly files_reparsed: number;
-    readonly bytes_read: number;
-    readonly cached_events_reused: number;
-    readonly usage_events_seen: number;
-    readonly usage_events_deduplicated: number;
-    readonly cache_enabled: boolean;
-  };
-};
-
-type ClaudeDesktopAccount = {
-  readonly configured: boolean;
-  readonly profile_id: string;
-  readonly profile_number: number | null;
-  readonly profile_name: string | null;
-  readonly display_name: string | null;
-  readonly is_selected: boolean;
-  readonly source: "local-history" | "local-agent-session" | "desktop-api";
-  readonly metric: "quota-percent" | "token-usage";
-  readonly cached_at: string | null;
-  readonly stale: boolean;
-  readonly five_hour: { utilization: number; resets_at: string | null } | null;
-  readonly seven_day: { utilization: number; resets_at: string | null } | null;
-  readonly quota_refresh_status?: "live" | "failed";
-  readonly quota_refresh_error?: string | null;
-  readonly quota_retry_at?: string | null;
-  readonly token_usage_status?: "observed" | "partial" | "unavailable";
-  readonly token_usage_source?: string;
-  readonly token_usage_files?: number;
-  readonly token_usage_truncated?: boolean;
-  readonly token_usage_captured_at?: string;
-  readonly token_usage?: ClaudeDesktopTokenUsage | null;
-  readonly token_usage_provenance?: {
-    readonly source?: string;
-    readonly confidence?: string;
-    readonly captured_at?: string;
-    readonly session_files?: number;
-    readonly scan_stats?: ClaudeDesktopTokenUsage["scan_stats"];
-    readonly aggregation?: ClaudeDesktopTokenUsage["aggregation"];
-  };
-};
-
 interface UsageLimitsData {
   fetched_at: string;
-  claude: { configured: boolean; desktop_accounts?: readonly ClaudeDesktopAccount[]; error?: string | null; plan_label?: string | null; auth_action_required?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
+  claude: { configured: boolean; error?: string | null; plan_label?: string | null; auth_action_required?: string | null; five_hour?: { utilization: number; resets_at?: string }; seven_day?: { utilization: number; resets_at?: string }; seven_day_opus?: { utilization: number; resets_at?: string } | null; extra_usage?: { is_enabled: boolean; monthly_limit?: number | null; used_credits?: number | null; currency?: string | null } | null };
   codex: CodexUsageLimits;
   cursor: { configured: boolean; error?: string | null; plan_label?: string | null; membership_type?: string | null; primary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null; quaternary_window?: { used_percent: number; reset_at?: string | null; limit_window_seconds?: number | null } | null };
   gemini: { configured: boolean; error?: string | null; plan_label?: string | null; account_email?: string | null; account_plan?: string | null; primary_window?: { used_percent: number; reset_at?: string | null } | null; secondary_window?: { used_percent: number; reset_at?: string | null } | null; tertiary_window?: { used_percent: number; reset_at?: string | null } | null };

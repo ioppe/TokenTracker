@@ -91,121 +91,21 @@ final class UsageLimitsRetentionTests: XCTestCase {
         XCTAssertEqual(readings.first?.usedPercent, 25)
     }
 
-    func testDesktopQuotaDecodesWithoutClaudeCodeLoginAndKeepsItsSampleTime() throws {
+    func testLegacyDesktopAccountsAreIgnoredAndNotRetainedAsUsableData() throws {
         let response = try decodeResponse(overrides: [
             "claude": [
                 "configured": false,
                 "desktop_accounts": [[
-                    "configured": true, "profile_id": ".claude1", "profile_number": 1,
-                    "display_name": "Work", "metric": "quota-percent",
-                    "cached_at": "2026-10-02T10:00:00Z", "stale": true,
-                    "five_hour": ["utilization": 0.0],
-                    "seven_day": ["utilization": 40.0],
+                    "configured": true, "profile_id": ".claude1",
+                    "metric": "token-usage", "token_usage_status": "unavailable",
+                    "five_hour": ["utilization": 95.0],
                 ]],
             ],
-        ])
-        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
-        XCTAssertTrue(response.hasAnyProviderWithoutError)
-        XCTAssertFalse(response.claude.configured)
-        XCTAssertNil(response.claude.fiveHour)
-        XCTAssertEqual(account.profileNumber, 1)
-        XCTAssertEqual(account.displayName, "Work")
-        XCTAssertEqual(account.cachedAt, "2026-10-02T10:00:00Z")
-        XCTAssertTrue(account.stale)
-        XCTAssertEqual(account.fiveHour?.utilization, 0)
-        XCTAssertNil(account.fiveHour?.resetsAt)
-        let encoded = try JSONEncoder().encode(response)
-        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: encoded), response)
-    }
-
-    func testDesktopAgentUsageDecodesWithoutInventingQuotaWindows() throws {
-        let response = try decodeResponse(overrides: [
-            "claude": [
-                "configured": false,
-                "desktop_accounts": [[
-                    "configured": true, "profile_id": "default", "metric": "token-usage",
-                    "cached_at": "2026-10-02T11:00:00Z", "stale": false,
-                    "five_hour": NSNull(), "seven_day": NSNull(),
-                    "token_usage_status": "observed",
-                    "token_usage": [
-                        "input_tokens": 150, "cache_read_input_tokens": 20,
-                        "cache_creation_input_tokens": 0, "output_tokens": 12,
-                        "total_tokens": 182, "messages": 2,
-                        "estimated_cost_usd": 0.012345, "estimated_cost_status": "complete",
-                    ],
-                ]],
-            ],
-        ])
-        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
-        let usage = try XCTUnwrap(account.tokenUsage)
-        XCTAssertTrue(account.hasData)
-        XCTAssertFalse(account.hasQuota)
-        XCTAssertEqual(usage.totalTokens, 182)
-        XCTAssertEqual(usage.cacheReadInputTokens, 20)
-        XCTAssertEqual(usage.estimatedCostUsd, 0.012345)
-        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: JSONEncoder().encode(response)), response)
-    }
-
-    func testLiveDesktopQuotaPreservesAuthoritativeResetTimes() throws {
-        let response = try decodeResponse(overrides: [
-            "claude": ["configured": false, "desktop_accounts": [[
-                "configured": true, "profile_id": "default", "metric": "quota-percent",
-                "source": "desktop-api", "quota_refresh_status": "live",
-                "cached_at": "2026-10-03T10:00:00Z", "stale": false,
-                "five_hour": ["utilization": 18.0, "resets_at": "2026-10-03T12:00:00Z"],
-            ]]],
-        ])
-        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
-        XCTAssertEqual(account.source, "desktop-api")
-        XCTAssertEqual(account.quotaRefreshStatus, "live")
-        XCTAssertEqual(account.fiveHour?.resetsAt, "2026-10-03T12:00:00Z")
-        XCTAssertNil(account.quotaRefreshError)
-        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: JSONEncoder().encode(response)), response)
-    }
-
-    func testDesktopConnectionFailureWithoutSamplesHasNoCaptureTime() throws {
-        let response = try decodeResponse(overrides: [
-            "claude": ["configured": false, "desktop_accounts": [[
-                "configured": true, "profile_id": "default", "metric": "token-usage",
-                "cached_at": NSNull(), "stale": false, "token_usage_status": "unavailable",
-                "quota_refresh_status": "failed", "quota_refresh_error": "keychain-access-required",
-            ]]],
-        ])
-        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
-        XCTAssertTrue(account.hasData)
-        XCTAssertNil(account.cachedAt)
-        XCTAssertNil(account.fiveHour)
-        XCTAssertNil(account.tokenUsage)
-        XCTAssertEqual(account.quotaRefreshError, "keychain-access-required")
-        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: JSONEncoder().encode(response)), response)
-    }
-
-    func testDesktopAgentUsageWithoutUsageFieldsIsStillVisibleAsUnavailable() throws {
-        let response = try decodeResponse(overrides: [
-            "claude": ["configured": false, "desktop_accounts": [[
-                "configured": true, "profile_id": "default", "metric": "token-usage",
-                "cached_at": "2026-10-02T11:00:00Z", "stale": false,
-                "token_usage_status": "unavailable",
-            ]]],
-        ])
-        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
-        XCTAssertTrue(account.hasData)
-        XCTAssertTrue(response.hasAnyProviderWithoutError)
-        XCTAssertNil(account.tokenUsage)
-    }
-
-    func testEmptyDesktopQuotaDoesNotCountAsUsableData() throws {
-        let response = try decodeResponse(overrides: [
-            "claude": ["configured": false, "desktop_accounts": [[
-                "configured": true, "profile_id": "default", "metric": "quota-percent",
-                "cached_at": "2026-10-02T10:00:00Z", "stale": true,
-            ]]],
         ])
         XCTAssertFalse(response.hasAnyProviderWithoutError)
-    }
-
-    func testOldClaudePayloadHasNoDesktopAccounts() throws {
-        XCTAssertNil(try decodeResponse().claude.desktopAccounts)
+        let encoded = try JSONEncoder().encode(response)
+        XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("desktop_accounts"))
+        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: encoded), response)
     }
 
     func testAllConfiguredProvidersErroredHasNoUsableProvider() throws {

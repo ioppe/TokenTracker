@@ -99,43 +99,7 @@ struct UsageLimitsView: View {
     }
 
     private func buildVisibleGroups(_ limits: UsageLimitsResponse) -> [AnyView] {
-        settings.providerOrder.flatMap { id -> [AnyView] in
-            var groups = sectionIfContent(id: id, limits: limits).map { [$0] } ?? []
-            if id == "claude", settings.isVisible(id) {
-                for account in limits.claude.desktopAccounts ?? [] where account.hasData {
-                    let accountName = account.displayName
-                        ?? account.profileNumber.map(Strings.claudeDesktopNumberedAccount)
-                        ?? account.profileName
-                        ?? Strings.claudeDesktopDefaultAccount
-                    let tokenSummary: String? = {
-                        if let usage = account.tokenUsage {
-                            let cost = usage.estimatedCostUsd.map(TokenFormatter.formatCost)
-                            return Strings.claudeDesktopTokenUsageSummary(
-                                input: TokenFormatter.formatCompact(usage.inputTokens),
-                                output: TokenFormatter.formatCompact(usage.outputTokens),
-                                total: TokenFormatter.formatCompact(usage.totalTokens),
-                                cost: cost,
-                                partial: account.tokenUsageStatus == "partial"
-                            )
-                        }
-                        switch account.tokenUsageStatus {
-                        case "unavailable": return Strings.claudeDesktopTokenUsageUnavailable
-                        case "partial": return Strings.claudeDesktopTokenUsagePartial
-                        default: return Strings.claudeDesktopTokenUsageUnavailable
-                        }
-                    }()
-                    if let group = toolSection(
-                        id: "claude-desktop:\(account.id)",
-                        title: Strings.claudeDesktopTitle(accountName),
-                        assetName: "ClaudeLogo", toolName: "Claude", specs: [],
-                        titleSuffix: Strings.claudeDesktopTokenUsage,
-                        detailText: tokenSummary,
-                        updatedAtISO: account.tokenUsageCapturedAt, isStale: false
-                    ) { groups.append(group) }
-                }
-            }
-            return groups
-        }
+        settings.providerOrder.compactMap { sectionIfContent(id: $0, limits: limits) }
     }
 
     /// Builds one provider's section, or nil when it would carry no quota rows

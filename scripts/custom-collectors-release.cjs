@@ -26,25 +26,34 @@ function buildMetadata(env, version) {
 
 function validateBundledCollectors(app) {
   const embedded = path.join(app, "Contents", "Resources", "EmbeddedServer", "tokentracker");
-  for (const name of ["claude-desktop.js", "claude-desktop-limits.js", "claude-desktop-live.js"]) {
+  for (const name of ["claude-desktop.js", "pi-desktop-usage.js", "rollout.js"]) {
     const file = path.join(embedded, "src", "lib", name);
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
       throw new Error(`Missing bundled collector: ${name}`);
     }
   }
-  const limits = fs.readFileSync(path.join(embedded, "src", "lib", "usage-limits.js"), "utf8");
-  if (!limits.includes('require("./claude-desktop-limits")')) {
-    throw new Error("Bundled limits API does not load the custom Claude Desktop collector");
+  const sync = fs.readFileSync(path.join(embedded, "src", "commands", "sync.js"), "utf8");
+  const rollout = fs.readFileSync(path.join(embedded, "src", "lib", "rollout.js"), "utf8");
+  if (!sync.includes('require("../lib/claude-desktop")')
+      || !sync.includes("parsePiDesktopIncremental")
+      || !rollout.includes('require("./pi-desktop-usage")')) {
+    throw new Error("Bundled token sync does not load the custom transcript collectors");
   }
-  const desktop = fs.readFileSync(path.join(embedded, "src", "lib", "claude-desktop-limits.js"), "utf8");
-  if (!desktop.includes('require("./claude-desktop-live")')) {
-    throw new Error("Bundled Desktop collector does not load live quota refresh");
+  const limits = fs.readFileSync(path.join(embedded, "src", "lib", "usage-limits.js"), "utf8");
+  if (/claude-desktop-(?:limits|live)/.test(limits)
+      || ["claude-desktop-limits.js", "claude-desktop-live.js"].some((name) =>
+        fs.existsSync(path.join(embedded, "src", "lib", name)))) {
+    throw new Error("Bundled payload still contains the removed Claude Desktop local-log feature");
   }
   const assets = path.join(embedded, "dashboard", "dist", "assets");
-  const hasDesktopUI = fs.readdirSync(assets).filter((name) => name.endsWith(".js"))
-    .some((name) => fs.readFileSync(path.join(assets, name), "utf8")
-      .includes("usage.claude_desktop.local_scope"));
-  if (!hasDesktopUI) throw new Error("Bundled dashboard is missing Claude Desktop collection status");
+  const dashboard = fs.readdirSync(assets).filter((name) => name.endsWith(".js"))
+    .map((name) => fs.readFileSync(path.join(assets, name), "utf8"));
+  if (dashboard.some((content) => /(?:usage|limits)\.claude_desktop\./.test(content))) {
+    throw new Error("Bundled dashboard still contains Claude Desktop local-log display");
+  }
+  if (!dashboard.some((content) => /Object\.freeze\(\[\s*["']claude["']\s*,\s*["']codex["']\s*\]\)/.test(content))) {
+    throw new Error("Bundled dashboard is missing the custom quota display policy");
+  }
 }
 
 function stampApp(app, metadata, run = execFileSync) {

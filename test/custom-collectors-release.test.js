@@ -19,14 +19,17 @@ function fixture(t) {
   const embedded = path.join(app, "Contents", "Resources", "EmbeddedServer", "tokentracker");
   const lib = path.join(embedded, "src", "lib");
   const assets = path.join(embedded, "dashboard", "dist", "assets");
+  const commands = path.join(embedded, "src", "commands");
   fs.mkdirSync(lib, { recursive: true });
   fs.mkdirSync(assets, { recursive: true });
+  fs.mkdirSync(commands, { recursive: true });
   fs.writeFileSync(path.join(lib, "claude-desktop.js"), "module.exports = {};");
-  fs.writeFileSync(path.join(lib, "claude-desktop-limits.js"), 'require("./claude-desktop-live");');
-  fs.writeFileSync(path.join(lib, "claude-desktop-live.js"), "module.exports = {};");
-  fs.writeFileSync(path.join(lib, "usage-limits.js"), 'require("./claude-desktop-limits");');
-  fs.writeFileSync(path.join(assets, "index.js"), 'copy("usage.claude_desktop.local_scope");');
-  return { app, lib, assets };
+  fs.writeFileSync(path.join(lib, "pi-desktop-usage.js"), "module.exports = {};");
+  fs.writeFileSync(path.join(lib, "rollout.js"), 'require("./pi-desktop-usage");');
+  fs.writeFileSync(path.join(commands, "sync.js"), 'require("../lib/claude-desktop"); parsePiDesktopIncremental();');
+  fs.writeFileSync(path.join(lib, "usage-limits.js"), "module.exports = {};");
+  fs.writeFileSync(path.join(assets, "index.js"), 'Object.freeze(["claude","codex"]);');
+  return { app, lib, assets, commands };
 }
 
 test("custom build identity requires a repository, source SHA and CI build number", () => {
@@ -42,20 +45,29 @@ test("custom build identity requires a repository, source SHA and CI build numbe
 test("custom package validation rejects an official or stale embedded payload", (t) => {
   const f = fixture(t);
   validateBundledCollectors(f.app);
-  fs.writeFileSync(path.join(f.lib, "usage-limits.js"), "module.exports = {};");
+  fs.writeFileSync(path.join(f.commands, "sync.js"), "module.exports = {};");
   assert.throws(() => validateBundledCollectors(f.app), /does not load/);
-  fs.writeFileSync(path.join(f.lib, "usage-limits.js"), 'require("./claude-desktop-limits");');
+  fs.writeFileSync(path.join(f.commands, "sync.js"), 'require("../lib/claude-desktop"); parsePiDesktopIncremental();');
   fs.writeFileSync(path.join(f.assets, "index.js"), "old dashboard");
-  assert.throws(() => validateBundledCollectors(f.app), /missing Claude Desktop/);
+  assert.throws(() => validateBundledCollectors(f.app), /missing the custom quota display policy/);
 });
 
-test("custom package validation requires the live collector and its wiring", (t) => {
+test("custom package validation rejects stale local-log code and display assets", (t) => {
   const f = fixture(t);
-  fs.writeFileSync(path.join(f.lib, "claude-desktop-limits.js"), "module.exports = {};");
-  assert.throws(() => validateBundledCollectors(f.app), /does not load live quota/);
-  fs.writeFileSync(path.join(f.lib, "claude-desktop-limits.js"), 'require("./claude-desktop-live");');
+  fs.writeFileSync(path.join(f.lib, "usage-limits.js"), 'require("./claude-desktop-limits");');
+  assert.throws(() => validateBundledCollectors(f.app), /removed Claude Desktop/);
+  fs.writeFileSync(path.join(f.lib, "usage-limits.js"), "module.exports = {};");
+  fs.writeFileSync(path.join(f.lib, "claude-desktop-live.js"), "module.exports = {};");
+  assert.throws(() => validateBundledCollectors(f.app), /removed Claude Desktop/);
   fs.unlinkSync(path.join(f.lib, "claude-desktop-live.js"));
-  assert.throws(() => validateBundledCollectors(f.app), /Missing bundled collector: claude-desktop-live/);
+  fs.writeFileSync(path.join(f.assets, "old.js"), 'copy("usage.claude_desktop.local_scope");');
+  assert.throws(() => validateBundledCollectors(f.app), /still contains Claude Desktop local-log display/);
+});
+
+test("custom package validation preserves the real token collectors", (t) => {
+  const f = fixture(t);
+  fs.unlinkSync(path.join(f.lib, "pi-desktop-usage.js"));
+  assert.throws(() => validateBundledCollectors(f.app), /Missing bundled collector: pi-desktop-usage/);
 });
 
 test("custom app stamping preserves the stable platform version and pins the fork feed", (t) => {

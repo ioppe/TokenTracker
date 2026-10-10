@@ -59,42 +59,6 @@ enum Strings {
     }
 
     static var usageLimitsTitle: String { t("Limits", "限额", "限額", "上限", "한도") }
-    static var claudeDesktopDefaultAccount: String { t("Default account", "默认账号", "預設帳號", "既定のアカウント", "기본 계정") }
-    static var claudeDesktopQuotaSnapshot: String { t("Quota snapshot", "额度快照", "額度快照", "使用量スナップショット", "사용량 스냅샷") }
-    static var claudeDesktopLiveQuota: String { t("Live quota", "实时额度", "即時額度", "最新の使用量", "실시간 사용량") }
-    static func claudeDesktopQuotaError(_ code: String?) -> String? {
-        switch code {
-        case "keychain-access-required": return t("Claude keychain access required", "需要允许访问 Claude 钥匙串", "需要允許存取 Claude 鑰匙圈", "Claude キーチェーンへのアクセスが必要", "Claude 키체인 접근 필요")
-        case "desktop-sign-in-required": return t("Claude Desktop sign-in required", "需要重新登录 Claude Desktop", "需要重新登入 Claude Desktop", "Claude Desktop へのログインが必要", "Claude Desktop 로그인 필요")
-        case "desktop-rate-limited": return t("Claude quota refresh is rate-limited", "Claude 额度查询被限流", "Claude 額度查詢被限流", "Claude 使用量の取得制限", "Claude 사용량 조회 제한")
-        case nil, "desktop-live-unsupported": return nil
-        default: return t("Claude quota refresh failed", "Claude 实时额度查询失败", "Claude 即時額度查詢失敗", "Claude 使用量の取得に失敗", "Claude 사용량 조회 실패")
-        }
-    }
-    static var claudeDesktopTokenUsage: String { t("Token usage", "Token 用量", "Token 用量", "トークン使用量", "토큰 사용량") }
-    static var claudeDesktopTokenUsageUnavailable: String { t("Token usage unavailable", "Token 用量不可用", "Token 用量不可用", "トークン使用量は利用できません", "토큰 사용량을 사용할 수 없음") }
-    static var claudeDesktopTokenUsagePartial: String { t("Token usage is partial; some files were skipped", "Token 用量不完整，部分文件已跳过", "Token 用量不完整，部分檔案已略過", "トークン使用量は部分的です。一部のファイルをスキップしました", "토큰 사용량이 부분적이며 일부 파일을 건너뜀") }
-    static func claudeDesktopTokenUsageSummary(input: String, output: String, total: String, cost: String?, partial: Bool = false) -> String {
-        let suffix = cost.map {
-            t(" | API est. \($0)", " | API 估算 \($0)", " | API 估算 \($0)", " | API 推定 \($0)", " | API 예상 \($0)")
-        } ?? ""
-        let partialSuffix = partial
-            ? t(" | partial scan", " | 扫描不完整", " | 掃描不完整", " | 部分スキャン", " | 부분 스캔")
-            : ""
-        return t(
-            "Usage: \(total) tokens | in \(input) | out \(output)\(suffix)\(partialSuffix)",
-            "用量：\(total) tokens | 输入 \(input) | 输出 \(output)\(suffix)\(partialSuffix)",
-            "用量：\(total) tokens | 輸入 \(input) | 輸出 \(output)\(suffix)\(partialSuffix)",
-            "使用量：\(total) tokens | 入力 \(input) | 出力 \(output)\(suffix)\(partialSuffix)",
-            "사용량: \(total) tokens | 입력 \(input) | 출력 \(output)\(suffix)\(partialSuffix)"
-        )
-    }
-    static func claudeDesktopNumberedAccount(_ number: Int) -> String {
-        t("Account \(number)", "账号 \(number)", "帳號 \(number)", "アカウント \(number)", "계정 \(number)")
-    }
-    static func claudeDesktopTitle(_ account: String) -> String {
-        t("Claude Desktop \(account)", "Claude 桌面端 \(account)", "Claude 桌面端 \(account)", "Claude デスクトップ \(account)", "Claude 데스크톱 \(account)")
-    }
     static var providerServiceIssue: String { t("Service issue reported", "服务异常", "服務異常", "サービス障害が報告されています", "서비스 장애가 보고됨") }
     static var providerStatusOpenPage: String { t("Open status page", "打开状态页", "打開狀態頁", "ステータスページを開く", "상태 페이지 열기") }
     static var sessionExpired: String { t("Session expired", "会话已过期", "會話已過期", "セッションが期限切れです", "세션이 만료되었습니다") }

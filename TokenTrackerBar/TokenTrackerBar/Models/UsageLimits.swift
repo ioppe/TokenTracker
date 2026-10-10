@@ -174,7 +174,6 @@ struct ClaudeLimits: Codable, Equatable {
     let sevenDayOpus: ClaudeWindow?
     let weeklyScoped: [ClaudeScopedWindow]?
     let extraUsage: ClaudeExtraUsage?
-    let desktopAccounts: [ClaudeDesktopAccount]?
     /// When this data was last successfully fetched from the provider, and whether
     /// it is being served from the stale disk-cache fallback (e.g. during a 429
     /// cool-down when the live usage endpoint is rate-limited). Both are optional so
@@ -198,75 +197,9 @@ struct ClaudeLimits: Codable, Equatable {
         case sevenDayOpus = "seven_day_opus"
         case weeklyScoped = "weekly_scoped"
         case extraUsage = "extra_usage"
-        case desktopAccounts = "desktop_accounts"
         case cachedAt = "cached_at"
         case retryAt = "retry_at"
         case serviceStatus = "service_status"
-    }
-}
-
-struct ClaudeDesktopAccount: Codable, Equatable, Identifiable {
-    let configured: Bool
-    let profileID: String
-    let profileNumber: Int?
-    let profileName: String?
-    let displayName: String?
-    let metric: String
-    let cachedAt: String?
-    let stale: Bool
-    let fiveHour: ClaudeWindow?
-    let sevenDay: ClaudeWindow?
-    let tokenUsageStatus: String?
-    let tokenUsageCapturedAt: String?
-    let tokenUsageTruncated: Bool?
-    let tokenUsage: ClaudeDesktopTokenUsage?
-    let source: String?
-    let quotaRefreshStatus: String?
-    let quotaRefreshError: String?
-
-    var id: String { profileID }
-    var hasQuota: Bool { configured && metric == "quota-percent" && (fiveHour != nil || sevenDay != nil) }
-    var hasTokenUsage: Bool { configured && (tokenUsage != nil || tokenUsageStatus == "partial" || tokenUsageStatus == "unavailable") }
-    var hasData: Bool { hasQuota || hasTokenUsage }
-
-    enum CodingKeys: String, CodingKey {
-        case configured, metric, stale
-        case profileID = "profile_id"
-        case profileNumber = "profile_number"
-        case profileName = "profile_name"
-        case displayName = "display_name"
-        case cachedAt = "cached_at"
-        case fiveHour = "five_hour"
-        case sevenDay = "seven_day"
-        case tokenUsageStatus = "token_usage_status"
-        case tokenUsageCapturedAt = "token_usage_captured_at"
-        case tokenUsageTruncated = "token_usage_truncated"
-        case tokenUsage = "token_usage"
-        case source
-        case quotaRefreshStatus = "quota_refresh_status"
-        case quotaRefreshError = "quota_refresh_error"
-    }
-}
-
-struct ClaudeDesktopTokenUsage: Codable, Equatable {
-    let inputTokens: Int
-    let cacheReadInputTokens: Int
-    let cacheCreationInputTokens: Int
-    let outputTokens: Int
-    let totalTokens: Int
-    let messages: Int
-    let estimatedCostUsd: Double?
-    let estimatedCostStatus: String?
-
-    enum CodingKeys: String, CodingKey {
-        case inputTokens = "input_tokens"
-        case cacheReadInputTokens = "cache_read_input_tokens"
-        case cacheCreationInputTokens = "cache_creation_input_tokens"
-        case outputTokens = "output_tokens"
-        case totalTokens = "total_tokens"
-        case messages
-        case estimatedCostUsd = "estimated_cost_usd"
-        case estimatedCostStatus = "estimated_cost_status"
     }
 }
 
@@ -768,7 +701,6 @@ extension UsageLimitsResponse {
             (devin?.configured ?? false, devin?.error),
         ]
         return providers.contains { $0.0 && $0.1 == nil }
-            || claude.desktopAccounts?.contains { $0.hasData } == true
     }
 
     /// Decide which record the UI should display after a successful fetch:

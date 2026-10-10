@@ -171,7 +171,6 @@ export function DashboardView(props) {
     announceUsageLoading,
     initialDashboardLoading,
     fleetData,
-    desktopAccounts,
     hasDetailsActual,
     dailyEmptyPrefix,
     installSyncCmd,
@@ -364,7 +363,6 @@ export function DashboardView(props) {
               summaryCostValue={summaryCostValue}
               onCostInfo={costInfoEnabled ? openCostModal : null}
               fleetData={fleetData}
-              desktopAccounts={desktopAccounts}
               onRefresh={screenshotMode ? null : refreshAll}
               loading={usageLoadingState}
               announceLoading={announceUsageLoading}

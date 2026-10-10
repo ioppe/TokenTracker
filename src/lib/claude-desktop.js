@@ -86,20 +86,8 @@ function claudeDesktopTranscriptDirs(profiles) {
   ]);
 }
 
-function claudeDesktopAgentSessionDirs(profiles) {
-  // This list is intentionally separate from claudeDesktopTranscriptDirs().
-  // The legacy sync collector treats Cowork workspaces as unrelated to the
-  // background token queue; usage-limits needs them only for local usage data.
-  return profiles.flatMap((root) => [
-    path.join(root, "projects"),
-    path.join(root, "claude-code-sessions"),
-    path.join(root, "local-agent-mode-sessions"),
-  ]);
-}
-
 module.exports = {
   claudeDesktopDefaultRoot,
   discoverClaudeDesktopProfiles,
   claudeDesktopTranscriptDirs,
-  claudeDesktopAgentSessionDirs,
 };

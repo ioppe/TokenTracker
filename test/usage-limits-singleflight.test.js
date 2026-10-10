@@ -39,6 +39,33 @@ function makeCountingDeps() {
 }
 
 describe("getUsageLimits single-flight", () => {
+  it("does not read or publish removed Desktop account telemetry", async (t) => {
+    resetUsageLimitsCache();
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-no-desktop-telemetry-"));
+    t.after(() => { resetUsageLimitsCache(); fs.rmSync(home, { recursive: true, force: true }); });
+    const profile = path.join(home, ".claude1");
+    fs.mkdirSync(path.join(profile, "usage-ledger"), { recursive: true });
+    fs.writeFileSync(path.join(profile, "usage-ledger", "2026-10-10.ndjson"), JSON.stringify({
+      version: 1, model: "claude-sonnet-4", input_tokens: 100, output_tokens: 20,
+    }));
+    fs.writeFileSync(path.join(profile, "plan-usage-history.json"), JSON.stringify({
+      samples: [{ t: Date.now(), org: "private", fh: 95, sd: 55 }],
+    }));
+    const securityCalls = [];
+    const { options, countFetchCalls } = makeCountingDeps();
+    const result = await getUsageLimits({
+      ...options, home, env: {}, platform: "darwin", forceRefresh: true,
+      securityRunner(command, args) {
+        securityCalls.push([command, ...args].join(" "));
+        return { status: 1, stdout: "" };
+      },
+    });
+
+    assert.equal(Object.hasOwn(result.claude, "desktop_accounts"), false);
+    assert.equal(countFetchCalls(), 0);
+    assert.ok(!securityCalls.some(call => /Claude Safe Storage|Claude Key/.test(call)));
+  });
+
   it("shares one upstream fetch round across concurrent cache misses", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-singleflight-"));

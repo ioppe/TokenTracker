@@ -1447,8 +1447,6 @@ export function DashboardPage({
       timeZoneRangeLabel={timeZoneRangeLabel}
       usageSourceLabel={usageSourceLabel}
       fleetData={fleetData}
-      desktopAccounts={isLocalMode && !screenshotMode && (!selectedDevice || selectedDevice === getCurrentDeviceId())
-        ? usageLimits?.claude?.desktop_accounts : []}
       hasDetailsActual={hasDetailsActual}
       dailyEmptyPrefix={dailyEmptyPrefix}
       installSyncCmd={installSyncCmd}
