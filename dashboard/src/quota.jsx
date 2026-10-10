@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, GripHorizontal, Settings2, ArrowUpRight, Check,
 import { copy, setCopyLocale } from "./lib/copy";
 import { desktopQuotaRows, selectQuotaRows, mergeQuotaSnapshot, quotaPeriodLabel, quotaResetCountdown } from "./lib/desktop-quota.js";
 import { limitProviderName } from "./lib/limits-providers.js";
+import { HIDDEN_UNVERIFIED_QUOTA_PROVIDERS } from "./lib/limits-display-policy.js";
 import "./quota.css";
 
 function send(message) { window.chrome?.webview?.postMessage(message); }
@@ -31,7 +32,9 @@ export function QuotaWidget() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
   const label = row => quotaPeriodLabel(row, context.locale) || row.label || copy(row.labelKey);
-  const rows = desktopQuotaRows(context.limits);
+  const rows = desktopQuotaRows(context.limits, {
+    hiddenQuotaProviders: HIDDEN_UNVERIFIED_QUOTA_PROVIDERS,
+  });
   const selected = Array.isArray(context.selected) ? context.selected : [];
   const compact = selectQuotaRows(rows, selected);
   const resetText = row => { return row.stale ? copy("quota.stale") : !Number.isFinite(row.resetMs) ? copy("quota.no_reset") : row.resetMs <= now ? copy("quota.awaiting") : copy("quota.reset_in", { time: quotaResetCountdown(row.resetMs, now, context.locale) }); };

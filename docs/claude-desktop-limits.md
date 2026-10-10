@@ -29,8 +29,14 @@ Successful results carry `source: "desktop-api"`, authoritative reset times and
 the actual sample time. Failure preserves the last-good timestamp and marks it
 stale, or falls back to the original history snapshot with no invented reset.
 `quota_refresh_error` distinguishes keychain access, sign-in, denied requests,
-timeouts and rate limits. The dashboard and menu bar distinguish **Live quota**
-from **Quota snapshot**. A failed refresh never advances a historic capture date.
+timeouts and rate limits. A failed refresh never advances a historic capture date.
+
+The custom-collectors UI suppresses Claude Code, Claude Desktop and Codex quota
+values, including historic percentages, capture dates and quota-refresh errors.
+This applies to the usage page, limits page, menu bar, widgets and quota alerts;
+saved selections cannot restore these values. Backend payloads remain compatible.
+Measured local token counts, API-equivalent cost estimates and unavailable-token
+states stay visible. Token usage shares are not quota percentages and are retained.
 
 Set `TOKENTRACKER_CLAUDE_DESKTOP_LIVE=0` to disable credential access and network
 queries. Other operating systems currently retain the history-only fallback.

@@ -195,7 +195,7 @@ extension UsageLimitsResponse {
     /// never change; `windowLabel` is the human name shown in the celebration toast and
     /// mirrors the popover row labels in `UsageLimitsView` (spelled out where the popover
     /// abbreviates for space, e.g. "Gemini 5h" instead of "Gm 5h").
-    func limitWindowReadings() -> [(provider: String, windowKey: String, windowLabel: String, usedPercent: Double, resetAt: Double?)] {
+    func limitWindowReadings(excludingProviders hiddenProviders: Set<String> = []) -> [(provider: String, windowKey: String, windowLabel: String, usedPercent: Double, resetAt: Double?)] {
         var out: [(provider: String, windowKey: String, windowLabel: String, usedPercent: Double, resetAt: Double?)] = []
 
         func addGeneric(_ provider: String, _ configured: Bool, _ error: String?, _ windows: [(String, String, GenericLimitWindow?)]) {
@@ -290,6 +290,6 @@ extension UsageLimitsResponse {
             ])
         }
 
-        return out
+        return out.filter { !hiddenProviders.contains($0.provider) }
     }
 }

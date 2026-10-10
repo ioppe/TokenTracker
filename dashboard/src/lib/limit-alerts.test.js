@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildPredictiveLimitAlerts } from "./limit-alerts.js";
+import { HIDDEN_UNVERIFIED_QUOTA_PROVIDERS } from "./limits-display-policy.js";
 
 describe("buildPredictiveLimitAlerts", () => {
   it("alerts only when the current pace projects exhaustion before reset", () => {
@@ -18,5 +19,14 @@ describe("buildPredictiveLimitAlerts", () => {
     expect(buildPredictiveLimitAlerts({
       claude: { configured: true, five_hour: { utilization: 5, resets_at: reset } },
     }, { now })).toEqual([]);
+  });
+
+  it("does not notify from hidden Claude or Codex quota values", () => {
+    const now = Date.parse("2026-07-18T02:30:00Z");
+    const reset = new Date(now + 2.5 * 60 * 60_000).toISOString();
+    expect(buildPredictiveLimitAlerts({
+      claude: { configured: true, five_hour: { utilization: 80, resets_at: reset } },
+      codex: { configured: true, primary_window: { used_percent: 80, reset_at: Date.parse(reset) / 1000, limit_window_seconds: 18000 } },
+    }, { now, hiddenQuotaProviders: HIDDEN_UNVERIFIED_QUOTA_PROVIDERS })).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { notifyNative } from "./native-bridge.js";
 import { PROVIDER_LIMIT_SPECS } from "../ui/dashboard/components/usage-limits-provider-specs.js";
 import { limitProviderName } from "./limits-providers.js";
 import { copy } from "./copy";
+import { HIDDEN_UNVERIFIED_QUOTA_PROVIDERS } from "./limits-display-policy.js";
 
 const STORAGE_KEY = "tt.limitAlerts.cycles.v1";
 
@@ -14,10 +15,11 @@ function writeCycles(value) {
   try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value)); } catch { /* restricted webview */ }
 }
 
-export function buildPredictiveLimitAlerts(dataById, { now = Date.now() } = {}) {
+export function buildPredictiveLimitAlerts(dataById, { now = Date.now(), hiddenQuotaProviders = [] } = {}) {
   const alerts = [];
   const specs = PROVIDER_LIMIT_SPECS;
   for (const [providerId, data] of Object.entries(dataById || {})) {
+    if (hiddenQuotaProviders.includes(providerId)) continue;
     const providerSpec = specs[providerId];
     if (!data?.configured || data.error || !providerSpec) continue;
     for (const spec of providerSpec.windows(data)) {
@@ -48,7 +50,9 @@ export function buildPredictiveLimitAlerts(dataById, { now = Date.now() } = {}) 
 
 export function sendPredictiveLimitAlerts(dataById) {
   const cycles = readCycles();
-  const alerts = buildPredictiveLimitAlerts(dataById);
+  const alerts = buildPredictiveLimitAlerts(dataById, {
+    hiddenQuotaProviders: HIDDEN_UNVERIFIED_QUOTA_PROVIDERS,
+  });
   for (const alert of alerts) {
     if (cycles[alert.id]) continue;
     const provider = limitProviderName(alert.providerId);

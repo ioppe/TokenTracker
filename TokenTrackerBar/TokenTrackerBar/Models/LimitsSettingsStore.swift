@@ -63,6 +63,10 @@ final class LimitsSettingsStore: ObservableObject {
     /// credential-reading quota request.
     static let optInProviders: Set<String> = ["devin"]
 
+    /// Fork policy: unverified quotas stay out of displays and notifications,
+    /// independently of saved visibility settings or local token collection.
+    static let hiddenQuotaProviders: Set<String> = ["claude", "codex"]
+
     static let iconNames: [String: String] = [
         "claude": "ClaudeLogo",
         "codex": "CodexLogo",
@@ -176,7 +180,7 @@ final class LimitsSettingsStore: ObservableObject {
     /// also removes that provider's metrics from the menu bar — unlike a
     /// transient provider outage, which keeps an already-selected metric.
     var hiddenProviders: Set<String> {
-        Set(providerVisibility.filter { !$0.value }.keys)
+        Set(providerVisibility.filter { !$0.value }.keys).union(Self.hiddenQuotaProviders)
     }
 
     /// Formats a raw utilization percent for compact surfaces (menu bar,

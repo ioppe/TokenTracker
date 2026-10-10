@@ -21,7 +21,7 @@ describe("ClaudeDesktopCollectionStatus", () => {
     expect(screen.getByText("Claude Desktop Personal")).toBeInTheDocument();
     expect(screen.getByText("Token usage unavailable")).toBeInTheDocument();
     expect(screen.getByText("No readable local token usage records")).toBeInTheDocument();
-    expect(screen.getByText(/Quota snapshot:.*1%.*0%/)).toBeInTheDocument();
+    expect(screen.queryByText(/Quota snapshot|Quota sampled|1%|0%/)).not.toBeInTheDocument();
     expect(screen.queryByText(/0 tokens|\$0/)).not.toBeInTheDocument();
   });
 
@@ -42,19 +42,18 @@ describe("ClaudeDesktopCollectionStatus", () => {
     expect(screen.getByText("没有可读取的本地 Token 用量记录")).toBeInTheDocument();
   });
 
-  it("labels current API quota as live and shows actionable refresh failures", () => {
+  it("never exposes quota values, dates or refresh errors from live or cached payloads", () => {
     const liveAccount = {
       ...quotaOnly, source: "desktop-api", quota_refresh_status: "live", stale: false,
     };
     const { rerender } = render(<ClaudeDesktopCollectionStatus accounts={[liveAccount]} />);
-    expect(screen.getByText(/Live quota:.*1%.*0%/)).toBeInTheDocument();
+    expect(screen.queryByText(/Live quota|Quota snapshot|Quota sampled|1%|0%/)).not.toBeInTheDocument();
     const failedAccount = {
       ...quotaOnly, quota_refresh_status: "failed", quota_refresh_error: "keychain-access-required",
     };
     rerender(<ClaudeDesktopCollectionStatus accounts={[failedAccount]} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Claude keychain access required");
-    expect(screen.getByText(/Quota snapshot:/)).toBeInTheDocument();
-    expect(screen.queryByText(/Live quota:/)).not.toBeInTheDocument();
+    expect(screen.getByText("Token usage unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/keychain access|Live quota|Quota snapshot|Quota sampled|1%|0%/)).not.toBeInTheDocument();
   });
 
   it("does not create a desktop provider when no local profile was detected", () => {

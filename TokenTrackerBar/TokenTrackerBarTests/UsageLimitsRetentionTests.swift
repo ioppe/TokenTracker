@@ -79,6 +79,18 @@ final class UsageLimitsRetentionTests: XCTestCase {
         XCTAssertFalse(response.hasAnyProviderWithoutError)
     }
 
+    func testHiddenQuotasCannotProduceResetReadingsButOtherProvidersRemain() throws {
+        let response = try decodeResponse(overrides: [
+            "claude": ["configured": true, "five_hour": ["utilization": 95.0]],
+            "codex": ["configured": true, "primary_window": ["used_percent": 42]],
+            "cursor": ["configured": true, "primary_window": ["used_percent": 25.0]],
+        ])
+        let readings = response.limitWindowReadings(excludingProviders: LimitsSettingsStore.hiddenQuotaProviders)
+
+        XCTAssertEqual(readings.map(\.provider), ["cursor"])
+        XCTAssertEqual(readings.first?.usedPercent, 25)
+    }
+
     func testDesktopQuotaDecodesWithoutClaudeCodeLoginAndKeepsItsSampleTime() throws {
         let response = try decodeResponse(overrides: [
             "claude": [

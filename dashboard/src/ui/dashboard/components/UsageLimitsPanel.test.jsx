@@ -149,9 +149,25 @@ describe("UsageLimitsPanel", () => {
     expect(screen.queryByText("Claude", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("Codex", { exact: true })).not.toBeInTheDocument();
     expect(screen.getByText("Claude Desktop Default account")).toBeInTheDocument();
-    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.getByText("Token usage unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("12%")).not.toBeInTheDocument();
+    expect(screen.queryByText("30%")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Quota snapshot|Quota sampled/)).not.toBeInTheDocument();
     expect(screen.queryByText("42%")).not.toBeInTheDocument();
     expect(screen.queryByText("28%")).not.toBeInTheDocument();
+  });
+
+  it("keeps measured desktop tokens and API estimates when provider quotas are hidden", () => {
+    render(<UsageLimitsPanel
+      claude={{ configured: true, desktop_accounts: [desktopAccount({
+        token_usage_status: "observed",
+        token_usage: { total_tokens: 120, input_tokens: 100, output_tokens: 20, estimated_cost_usd: 0.0006 },
+      })] }}
+      order={["claude"]}
+      hiddenQuotaProviders={["claude", "codex"]}
+    />);
+    expect(screen.getByText(/120 tokens.*API est\./)).toBeInTheDocument();
+    expect(screen.queryByText(/12%|30%|Quota snapshot/)).not.toBeInTheDocument();
   });
 
   it("shows observed Code/Cowork token usage and an API estimate when priced", () => {

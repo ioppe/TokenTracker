@@ -1,6 +1,6 @@
 import React from "react";
-import { copy, getCopyLocale } from "../../../lib/copy";
-import { desktopAccountName, desktopTokenUsageText, hasDesktopQuota, desktopQuotaLabel, desktopQuotaRefreshText } from "../../../lib/claude-desktop-display.js";
+import { copy } from "../../../lib/copy";
+import { desktopAccountName, desktopTokenUsageText } from "../../../lib/claude-desktop-display.js";
 import { ProviderIcon } from "./ProviderIcon.jsx";
 
 export function ClaudeDesktopCollectionStatus({ accounts = [] }) {
@@ -12,17 +12,6 @@ export function ClaudeDesktopCollectionStatus({ accounts = [] }) {
         {copy("usage.claude_desktop.local_scope")}
       </h3>
       {detected.map((account) => {
-        const refreshError = desktopQuotaRefreshText(account);
-        const captured = Date.parse(account.cached_at);
-        const sampledAt = Number.isFinite(captured) ? new Intl.DateTimeFormat(getCopyLocale(), {
-          month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
-        }).format(new Date(captured)) : null;
-        const quota = hasDesktopQuota(account) ? [
-          ["limits.label.claude_5h", account.five_hour?.utilization],
-          ["limits.label.claude_7d", account.seven_day?.utilization],
-        ].filter(([, value]) => typeof value === "number").map(([key, value]) =>
-          copy("usage.claude_desktop.quota_window", { window: copy(key), percent: value }),
-        ).join(" / ") : null;
         return (
           <div key={account.profile_id} className="flex items-start gap-2 text-xs min-w-0">
             <ProviderIcon provider="claude" size={16} className="shrink-0 mt-0.5" />
@@ -36,14 +25,6 @@ export function ClaudeDesktopCollectionStatus({ accounts = [] }) {
               {account.token_usage_unavailable_reason === "no-local-usage-files" ? (
                 <p className="text-oai-gray-500 dark:text-oai-gray-400">{copy("usage.claude_desktop.no_local_usage")}</p>
               ) : null}
-              {quota ? (
-                <p className="tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
-                  {desktopQuotaLabel(account)}{": "}{quota}
-                  {sampledAt ? <span>{" | "}{copy("limits.claude_desktop.sampled_at", { time: sampledAt })}</span> : null}
-                  {account.stale ? <span>{" | "}{copy("limits.provenance.stale")}</span> : null}
-                </p>
-              ) : null}
-              {refreshError ? <p className="text-oai-gray-600 dark:text-oai-gray-300" role="status">{refreshError}</p> : null}
             </div>
           </div>
         );

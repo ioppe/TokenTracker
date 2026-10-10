@@ -1026,7 +1026,7 @@ class DashboardViewModel: ObservableObject {
         guard let limits else { return }
         let snapshot = WeeklyLimitResetDetector.loadSnapshot()
         let (events, updated) = resetDetector.evaluate(
-            readings: limits.limitWindowReadings(),
+            readings: limits.limitWindowReadings(excludingProviders: LimitsSettingsStore.shared.hiddenProviders),
             snapshot: snapshot,
             now: Date().timeIntervalSince1970
         )

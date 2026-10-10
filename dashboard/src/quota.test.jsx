@@ -11,7 +11,7 @@ describe("desktop quota interactions", () => {
     window.chrome = { webview: { postMessage, addEventListener: (_, callback) => { receive = callback; }, removeEventListener: vi.fn() } };
     render(<QuotaWidget />);
     act(() => receive({ data: { type: "quota:context", locale: "en", selected: [], limits: {
-      codex: { configured: true, primary_window: { used_percent: 25 }, secondary_window: { used_percent: 40 } },
+      cursor: { configured: true, primary_window: { used_percent: 25 }, secondary_window: { used_percent: 40 } },
     } } }));
     expect(screen.getByText("75")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "Expand limits" })[0]);
@@ -25,6 +25,19 @@ describe("desktop quota interactions", () => {
     expect(screen.queryByRole("meter")).not.toBeInTheDocument();
     expect(postMessage).toHaveBeenCalledWith("quota:collapse");
   });
+});
+
+it("hides Claude and Codex quotas even when native selections still pin them", () => {
+  let receive;
+  window.chrome = { webview: { postMessage: vi.fn(), addEventListener: (_, callback) => { receive = callback; }, removeEventListener: vi.fn() } };
+  render(<QuotaWidget />);
+  act(() => receive({ data: { type: "quota:context", locale: "en", selected: ["claude:5h", "codex:5h"], limits: {
+    claude: { configured: true, five_hour: { utilization: 95 } },
+    codex: { configured: true, primary_window: { used_percent: 42 } },
+  } } }));
+  expect(screen.queryByText(/Claude|Codex|58|95/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", { name: "Expand limits" })[0]);
+  expect(screen.queryByRole("meter")).not.toBeInTheDocument();
 });
 
 it("closes from compact and expanded views without expanding or opening the dashboard", () => {

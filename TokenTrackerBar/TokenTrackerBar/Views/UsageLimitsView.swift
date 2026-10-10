@@ -19,10 +19,6 @@ struct UsageLimitsView: View {
     private static let rowColumnSpacing: CGFloat = 5
     private static let percentColumnWidth: CGFloat = 34
     private static let relativeResetColumnWidth: CGFloat = 24
-    /// These primary quota rows are not currently backed by a live,
-    /// verifiable value for the supported account types. Claude Desktop local
-    /// account rows are still appended separately below the provider row.
-    private static let hiddenUnverifiedQuotaProviders: Set<String> = ["claude", "codex"]
     private static var resetExpiryColumnWidth: CGFloat {
         percentColumnWidth + rowColumnSpacing + relativeResetColumnWidth
     }
@@ -107,13 +103,6 @@ struct UsageLimitsView: View {
             var groups = sectionIfContent(id: id, limits: limits).map { [$0] } ?? []
             if id == "claude", settings.isVisible(id) {
                 for account in limits.claude.desktopAccounts ?? [] where account.hasData {
-                    var specs: [LimitWindowSpec] = []
-                    // Reset times are authoritative only for a current API response.
-                    let liveQuota = account.source == "desktop-api" && account.quotaRefreshStatus == "live" && !account.stale
-                    if account.hasQuota {
-                        if let window = account.fiveHour { specs.append(makeSpec("5h", window.utilization, iso: liveQuota ? window.resetsAt : nil)) }
-                        if let window = account.sevenDay { specs.append(makeSpec("7d", window.utilization, iso: liveQuota ? window.resetsAt : nil)) }
-                    }
                     let accountName = account.displayName
                         ?? account.profileNumber.map(Strings.claudeDesktopNumberedAccount)
                         ?? account.profileName
@@ -132,19 +121,16 @@ struct UsageLimitsView: View {
                         switch account.tokenUsageStatus {
                         case "unavailable": return Strings.claudeDesktopTokenUsageUnavailable
                         case "partial": return Strings.claudeDesktopTokenUsagePartial
-                        default: return nil
+                        default: return Strings.claudeDesktopTokenUsageUnavailable
                         }
                     }()
-                    let detail = [tokenSummary, Strings.claudeDesktopQuotaError(account.quotaRefreshError)].compactMap { $0 }.joined(separator: " · ")
                     if let group = toolSection(
                         id: "claude-desktop:\(account.id)",
                         title: Strings.claudeDesktopTitle(accountName),
-                        assetName: "ClaudeLogo", toolName: "Claude", specs: specs,
-                        titleSuffix: account.hasQuota
-                            ? (liveQuota ? Strings.claudeDesktopLiveQuota : Strings.claudeDesktopQuotaSnapshot)
-                            : Strings.claudeDesktopTokenUsage,
-                        detailText: detail.isEmpty ? nil : detail,
-                        updatedAtISO: account.cachedAt, isStale: account.stale
+                        assetName: "ClaudeLogo", toolName: "Claude", specs: [],
+                        titleSuffix: Strings.claudeDesktopTokenUsage,
+                        detailText: tokenSummary,
+                        updatedAtISO: account.tokenUsageCapturedAt, isStale: false
                     ) { groups.append(group) }
                 }
             }
@@ -157,7 +143,7 @@ struct UsageLimitsView: View {
     /// never collected. Shared rule for every provider, not a per-provider
     /// symptom guard.
     private func sectionIfContent(id: String, limits: UsageLimitsResponse) -> AnyView? {
-        guard settings.isVisible(id), !Self.hiddenUnverifiedQuotaProviders.contains(id) else { return nil }
+        guard settings.isVisible(id), !LimitsSettingsStore.hiddenQuotaProviders.contains(id) else { return nil }
 
         switch id {
         case "claude" where limits.claude.configured && limits.claude.error == nil:

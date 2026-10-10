@@ -2,9 +2,10 @@ import { PROVIDER_LIMIT_SPECS } from "../ui/dashboard/components/usage-limits-pr
 import { resetToMs, resolveWindowSeconds } from "./limit-pace.js";
 
 /** Use the dashboard's window definitions; never turn missing usage into zero. */
-export function desktopQuotaRows(snapshot) {
+export function desktopQuotaRows(snapshot, { hiddenQuotaProviders = [] } = {}) {
   const rows = [];
   for (const [provider, spec] of Object.entries(PROVIDER_LIMIT_SPECS)) {
+    if (hiddenQuotaProviders.includes(provider)) continue;
     const data = snapshot?.[provider];
     if (data?.configured !== true) continue;
     for (const window of spec.windows(data)) {

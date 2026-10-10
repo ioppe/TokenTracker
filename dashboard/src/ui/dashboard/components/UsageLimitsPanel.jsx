@@ -1228,12 +1228,13 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
   const groups = effectiveOrder
     .filter((id) => !visibility || visibility[id] !== false || subscriptionByProvider.has(id))
     .flatMap((id) => {
+      const hideQuota = hiddenQuotaProviderSet.has(id);
       const desktopAccounts = id === "claude" && Array.isArray(claude?.desktop_accounts)
         ? claude.desktop_accounts.filter((account) => account?.configured
           && (hasDesktopQuota(account) || hasDesktopTokenData(account)))
         : [];
       const subscription = subscriptionByProvider.get(id) || null;
-      const provider = hiddenQuotaProviderSet.has(id)
+      const provider = hideQuota
         ? subscription
           ? renderUnlinkedProvider(
             id,
@@ -1259,14 +1260,15 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
       return [provider, ...desktopAccounts.map((account) => {
         const key = `claude-desktop:${account.profile_id}`;
         const title = copy("limits.claude_desktop.title", { account: desktopAccountName(account) });
-        const tokenText = desktopTokenUsageText(account);
+        const tokenText = desktopTokenUsageText(account)
+          || (hideQuota ? copy("limits.claude_desktop.token_usage_unavailable") : null);
         const sampledAt = formatExactReset(Date.parse(account.cached_at));
         const tokenStatus = account.token_usage_status;
         const usageObserved = tokenStatus === "observed";
         const usageUnavailable = tokenStatus === "unavailable";
         const usagePartial = tokenStatus === "partial";
         const hasTokenStatus = usageObserved || usageUnavailable || usagePartial;
-        const hasQuota = hasDesktopQuota(account);
+        const hasQuota = !hideQuota && hasDesktopQuota(account);
         const badge = <StatusBadge
           label={hasQuota ? desktopQuotaLabel(account)
             : copy("limits.claude_desktop.token_usage_badge")}
@@ -1276,12 +1278,15 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
           tooltip={hasQuota && sampledAt
             ? copy("limits.claude_desktop.sampled_at", { time: sampledAt }) : null}
         />;
-        const refreshError = desktopQuotaRefreshText(account);
+        const refreshError = hideQuota ? null : desktopQuotaRefreshText(account);
         const tokenExtra = React.createElement(React.Fragment, null,
           tokenText ? React.createElement(StatusLine, null, tokenText) : null,
           refreshError ? React.createElement(StatusLine, null, refreshError) : null);
         return renderConfiguredProvider(
-          "claude", account, title, effectiveMode, expandedId === key,
+          "claude", hideQuota ? {
+            ...account, five_hour: null, seven_day: null,
+            seven_day_opus: null, weekly_scoped: [], extra_usage: null,
+          } : account, title, effectiveMode, expandedId === key,
           () => setExpandedId((prev) => prev === key ? null : key),
           badge, null, now, key,
           tokenExtra,

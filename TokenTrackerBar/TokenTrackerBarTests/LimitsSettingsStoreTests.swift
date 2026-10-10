@@ -6,6 +6,25 @@ final class LimitsSettingsStoreTests: XCTestCase {
     func testQoderCnUsesItsDedicatedIcon() {
         XCTAssertEqual(LimitsSettingsStore.iconNames["qoderCn"], "QoderCnLogo")
     }
+
+    func testUnverifiedQuotaPolicyOverridesStoredSelectionsWithoutHidingLocalTokenAccounts() {
+        let (store, defaults) = makeStore()
+        defaults.set(["claude": true, "codex": true], forKey: "LimitsProviderVisibility")
+        let reloaded = LimitsSettingsStore(userDefaults: defaults)
+
+        XCTAssertTrue(store.isVisible("claude"))
+        XCTAssertTrue(reloaded.isVisible("claude"))
+        XCTAssertTrue(reloaded.hiddenProviders.contains("claude"))
+        XCTAssertTrue(reloaded.hiddenProviders.contains("codex"))
+        let available = MenuBarDisplayPreferences.availableItemIDs(
+            keepingSelected: ["claude5h", "codex5h"],
+            hiddenProviders: reloaded.hiddenProviders
+        )
+        XCTAssertFalse(available.contains("claude5h"))
+        XCTAssertFalse(available.contains("codex5h"))
+        XCTAssertTrue(available.contains("todayTokens"))
+        XCTAssertTrue(available.contains("todayCost"))
+    }
     private var cancellables: Set<AnyCancellable> = []
 
     override func tearDown() {
