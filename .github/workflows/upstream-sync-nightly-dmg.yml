@@ -194,8 +194,8 @@ jobs:
 
       - name: Test desktop quota collectors and dashboard
         run: |
-          node --test test/claude-desktop-limits.test.js test/claude-desktop.test.js test/usage-limits.test.js test/usage-limits-singleflight.test.js test/limits-providers-parity.test.js test/upstream-sync-nightly-dmg-workflow.test.js test/create-dmg-ci.test.js test/custom-collectors-release.test.js
-          npm --prefix dashboard test -- src/ui/dashboard/components/UsageLimitsPanel.test.jsx src/ui/dashboard/components/ClaudeDesktopCollectionStatus.test.jsx src/hooks/use-usage-limits.test.ts src/pages/LimitsPage.test.jsx
+          node --test test/claude-desktop-live.test.js test/claude-desktop-limits.test.js test/claude-desktop.test.js test/usage-limits.test.js test/usage-limits-singleflight.test.js test/limits-providers-parity.test.js test/upstream-sync-nightly-dmg-workflow.test.js test/create-dmg-ci.test.js test/custom-collectors-release.test.js
+          npm --prefix dashboard test -- src/ui/dashboard/components/UsageLimitsPanel.test.jsx src/ui/dashboard/components/ClaudeDesktopCollectionStatus.test.jsx src/hooks/use-usage-limits.test.ts src/pages/LimitsPage.test.jsx src/quota.test.jsx src/lib/desktop-quota.test.js src/lib/limit-alerts.test.js
           npm --prefix dashboard run typecheck
 
       - name: Build dashboard
@@ -253,6 +253,7 @@ jobs:
             -scheme TokenTrackerBarTests \
             -destination 'platform=macOS' \
             -only-testing:TokenTrackerBarTests/UsageLimitsRetentionTests \
+            -only-testing:TokenTrackerBarTests/LimitsSettingsStoreTests \
             -only-testing:TokenTrackerBarTests/WeeklyLimitResetDetectorTests \
             -only-testing:TokenTrackerBarTests/UpdateChannelTests
 
