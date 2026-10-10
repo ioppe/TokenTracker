@@ -134,6 +134,40 @@ final class UsageLimitsRetentionTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: JSONEncoder().encode(response)), response)
     }
 
+    func testLiveDesktopQuotaPreservesAuthoritativeResetTimes() throws {
+        let response = try decodeResponse(overrides: [
+            "claude": ["configured": false, "desktop_accounts": [[
+                "configured": true, "profile_id": "default", "metric": "quota-percent",
+                "source": "desktop-api", "quota_refresh_status": "live",
+                "cached_at": "2026-10-03T10:00:00Z", "stale": false,
+                "five_hour": ["utilization": 18.0, "resets_at": "2026-10-03T12:00:00Z"],
+            ]]],
+        ])
+        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
+        XCTAssertEqual(account.source, "desktop-api")
+        XCTAssertEqual(account.quotaRefreshStatus, "live")
+        XCTAssertEqual(account.fiveHour?.resetsAt, "2026-10-03T12:00:00Z")
+        XCTAssertNil(account.quotaRefreshError)
+        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: JSONEncoder().encode(response)), response)
+    }
+
+    func testDesktopConnectionFailureWithoutSamplesHasNoCaptureTime() throws {
+        let response = try decodeResponse(overrides: [
+            "claude": ["configured": false, "desktop_accounts": [[
+                "configured": true, "profile_id": "default", "metric": "token-usage",
+                "cached_at": NSNull(), "stale": false, "token_usage_status": "unavailable",
+                "quota_refresh_status": "failed", "quota_refresh_error": "keychain-access-required",
+            ]]],
+        ])
+        let account = try XCTUnwrap(response.claude.desktopAccounts?.first)
+        XCTAssertTrue(account.hasData)
+        XCTAssertNil(account.cachedAt)
+        XCTAssertNil(account.fiveHour)
+        XCTAssertNil(account.tokenUsage)
+        XCTAssertEqual(account.quotaRefreshError, "keychain-access-required")
+        XCTAssertEqual(try JSONDecoder().decode(UsageLimitsResponse.self, from: JSONEncoder().encode(response)), response)
+    }
+
     func testDesktopAgentUsageWithoutUsageFieldsIsStillVisibleAsUnavailable() throws {
         let response = try decodeResponse(overrides: [
             "claude": ["configured": false, "desktop_accounts": [[

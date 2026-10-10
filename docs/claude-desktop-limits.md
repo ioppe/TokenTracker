@@ -1,33 +1,55 @@
-# Claude Desktop Quota Snapshots
+# Claude Desktop Collection
 
-Claude Desktop Chat does not supply the same local per-message token transcripts
-as Claude Code. The limits API therefore reads desktop quota history separately
-from the token collectors.
+The collector discovers the default Claude Desktop profile and CodexQuotaViewer's
+numbered `.claudeN` profiles. The launcher only chooses the profile; it does not
+fetch Claude's quota. `plan-usage-history.json` is a fallback, not a live feed.
 
-The reader discovers the default desktop profile, numbered `.claudeN` profiles
-used by CodexQuotaViewer, and explicitly configured desktop profiles. It reads
-only `plan-usage-history.json` version 2, plus optional CodexQuotaViewer profile
-names and the saved profile selection. No browser cookies or desktop login
-credentials are read, and no desktop request is intercepted.
+## Live Quota On macOS
 
-For each profile, the newest non-future observation supplies its five-hour
-(`u.fh`) and seven-day (`u.sd`) percentages. The reader never adds percentages,
-combines accounts, or fills a missing window from a previous login. Missing,
-malformed, oversized, or symlinked history files are skipped independently.
+The limits poll reads only Claude Desktop's own `sessionKey`, `lastActiveOrg` and
+optional `cf_clearance` cookies, plus its existing encrypted OAuth cache. Electron
+v10 values are decrypted with the **Claude Safe Storage / Claude Key** keychain
+item. macOS may require the user to authorize this access. Keys and credentials
+stay in memory; they are never returned in the local API, logged, or written to
+TokenTracker's usage cache. No browser profile is read and no desktop request is
+intercepted. The collector does not rotate Desktop's OAuth refresh tokens or
+modify its cookies/configuration.
 
-The local limits response exposes these observations in
-`claude.desktop_accounts`, with `metric: "quota-percent"`,
-`source: "local-history"`, the original `cached_at` sample time, and a `stale`
-flag after ten minutes. Organization identifiers and absolute profile paths are
-not returned. `is_selected` describes CodexQuotaViewer's saved selection, not a
-verified running process.
+A current, identity-matched OAuth token uses
+`https://api.anthropic.com/api/oauth/usage`; otherwise the signed-in Desktop
+session uses `https://claude.ai/api/organizations/{org}/usage`. Redirects are
+rejected. Each request has a deadline and HTTP 429 imposes a per-account cooldown
+which manual refresh cannot bypass. Quota is cached for three minutes, invalidated
+at reset boundaries, and explicitly refreshed by the limits refresh action.
+Account changes invalidate cached quota. Concurrent polls share one request.
+History fallbacks are restricted to the active organization when its identity is
+known. A connection failure without any observed sample has no capture timestamp.
 
-Dashboard and macOS limits panels show separate **Quota snapshot** rows under
-the Claude visibility setting. Claude Code's authenticated live quota remains
-unchanged. Historical observations contain no reset time, so they do not drive
-pace projections, token totals, costs, predictive alerts, or reset notifications.
+Successful results carry `source: "desktop-api"`, authoritative reset times and
+the actual sample time. Failure preserves the last-good timestamp and marks it
+stale, or falls back to the original history snapshot with no invented reset.
+`quota_refresh_error` distinguishes keychain access, sign-in, denied requests,
+timeouts and rate limits. The dashboard and menu bar distinguish **Live quota**
+from **Quota snapshot**. A failed refresh never advances a historic capture date.
 
-Refreshing TokenTracker rereads the file after its ordinary limits cache expires
-(or on an explicit refresh); Claude Desktop must update its own history to
-produce a new sample. A source checkout change does not replace an already
-installed app's bundled runtime: rebuild the desktop package to ship this reader.
+Set `TOKENTRACKER_CLAUDE_DESKTOP_LIVE=0` to disable credential access and network
+queries. Other operating systems currently retain the history-only fallback.
+
+## Tokens
+
+Ordinary subscription Chat without structured usage counters has no measured token
+count or API cost. Quota percentages are never converted to tokens. Counts are
+available only when the local profile actually contains supported telemetry:
+Code/Cowork/Agent JSONL with explicit usage fields, or Desktop's v1
+`usage-ledger/YYYY-MM-DD[.N].ndjson` files with per-model token deltas. Some Desktop
+configurations do not write this ledger; its absence is not zero usage. A VM disk
+or conversation cache alone is not a supported counter source.
+
+The scanner deduplicates streaming/copy records and differences explicit cumulative
+session counters. It returns all-date local counts, per-model API-equivalent cost
+estimates and scan coverage separately from the dashboard's selected-period totals.
+It never retains prompts, messages, tools or raw session identifiers. No historical
+Chat count is invented when the required telemetry is absent.
+
+Native apps bundle their own runtime. Rebuild and install the suffixed custom
+release to deploy collector changes; editing the source checkout is not sufficient.

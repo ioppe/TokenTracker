@@ -26,8 +26,12 @@ vi.mock("../lib/subscription-manager-api", () => ({
 }));
 
 vi.mock("../ui/dashboard/components/UsageLimitsPanel.jsx", () => ({
-  UsageLimitsPanel: ({ kimi, codex, subscriptions, displayMode }) => (
-    <div data-testid="limits-panel" data-display-mode={displayMode ?? "absent"}>
+  UsageLimitsPanel: ({ kimi, codex, subscriptions, displayMode, hiddenQuotaProviders }) => (
+    <div
+      data-testid="limits-panel"
+      data-display-mode={displayMode ?? "absent"}
+      data-hidden-quota-providers={hiddenQuotaProviders?.join(",")}
+    >
       {kimi?.configured ? "Kimi connected" : "Kimi missing"}
       {codex?.configured ? " Codex connected" : ""}
       {subscriptions?.map((subscription) => subscription.service).join(",")}
@@ -84,6 +88,7 @@ describe("LimitsPage", () => {
     );
 
     expect(screen.getByText("Kimi connected")).toBeInTheDocument();
+    expect(screen.getByTestId("limits-panel")).toHaveAttribute("data-hidden-quota-providers", "claude,codex");
   });
 
   it("uses matching preloaded limits as the hook initial state and skips the full skeleton", () => {

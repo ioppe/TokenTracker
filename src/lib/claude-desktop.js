@@ -18,7 +18,7 @@ function claudeDesktopDefaultRoot({ home = os.homedir(), env = process.env, plat
       : path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "Claude");
 }
 
-// Only known profile roots, never process arguments, cookies or auth files.
+// Discovery uses only known profile roots, never process arguments or auth files.
 // Numbered .claudeN directories are the isolated user-data-dir convention
 // used by account launchers such as CodexQuotaViewer.
 function discoverClaudeDesktopProfiles({

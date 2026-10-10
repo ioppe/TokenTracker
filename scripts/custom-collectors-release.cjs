@@ -26,14 +26,19 @@ function buildMetadata(env, version) {
 
 function validateBundledCollectors(app) {
   const embedded = path.join(app, "Contents", "Resources", "EmbeddedServer", "tokentracker");
-  for (const name of ["claude-desktop.js", "claude-desktop-limits.js"]) {
-    if (!fs.statSync(path.join(embedded, "src", "lib", name)).isFile()) {
+  for (const name of ["claude-desktop.js", "claude-desktop-limits.js", "claude-desktop-live.js"]) {
+    const file = path.join(embedded, "src", "lib", name);
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
       throw new Error(`Missing bundled collector: ${name}`);
     }
   }
   const limits = fs.readFileSync(path.join(embedded, "src", "lib", "usage-limits.js"), "utf8");
   if (!limits.includes('require("./claude-desktop-limits")')) {
     throw new Error("Bundled limits API does not load the custom Claude Desktop collector");
+  }
+  const desktop = fs.readFileSync(path.join(embedded, "src", "lib", "claude-desktop-limits.js"), "utf8");
+  if (!desktop.includes('require("./claude-desktop-live")')) {
+    throw new Error("Bundled Desktop collector does not load live quota refresh");
   }
   const assets = path.join(embedded, "dashboard", "dist", "assets");
   const hasDesktopUI = fs.readdirSync(assets).filter((name) => name.endsWith(".js"))

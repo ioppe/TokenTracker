@@ -1502,6 +1502,13 @@ limits.claude_desktop.title,limits,LimitsPage,UsageLimitsPanel,desktop_title,"Cl
 limits.claude_desktop.default_account,limits,LimitsPage,UsageLimitsPanel,desktop_default_account,"Default account",,active
 limits.claude_desktop.numbered_account,limits,LimitsPage,UsageLimitsPanel,desktop_numbered_account,"Account {{number}}",,active
 limits.claude_desktop.history,limits,LimitsPage,UsageLimitsPanel,desktop_history,"Quota snapshot",,active
+limits.claude_desktop.live,limits,LimitsPage,UsageLimitsPanel,desktop_live,"Live quota",,active
+limits.claude_desktop.keychain_required,limits,LimitsPage,UsageLimitsPanel,desktop_keychain,"Claude keychain access required",,active
+limits.claude_desktop.sign_in_required,limits,LimitsPage,UsageLimitsPanel,desktop_sign_in,"Claude Desktop sign-in required",,active
+limits.claude_desktop.access_denied,limits,LimitsPage,UsageLimitsPanel,desktop_access_denied,"Claude denied the quota request",,active
+limits.claude_desktop.rate_limited,limits,LimitsPage,UsageLimitsPanel,desktop_rate_limited,"Claude quota refresh is rate-limited",,active
+limits.claude_desktop.request_timeout,limits,LimitsPage,UsageLimitsPanel,desktop_timeout,"Claude quota request timed out",,active
+limits.claude_desktop.api_unavailable,limits,LimitsPage,UsageLimitsPanel,desktop_api_unavailable,"Claude quota API unavailable",,active
 limits.claude_desktop.sampled_at,limits,LimitsPage,UsageLimitsPanel,desktop_sampled_at,"Quota sampled {{time}}",,active
 limits.claude_desktop.token_usage_badge,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage_badge,"Token usage",,active
 limits.claude_desktop.token_usage,limits,LimitsPage,UsageLimitsPanel,desktop_token_usage,"{{total}} tokens | in {{input}} | out {{output}}{{cost_suffix}}",,active

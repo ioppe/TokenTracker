@@ -96,7 +96,8 @@ test("custom collector pushes build artifacts and publishes the current prerelea
 test("custom builds verify desktop snapshots and native reset isolation", () => {
   const content = loadWorkflow();
   assert.match(content, /node-version: 24/);
-  assert.match(content, /node --test test\/claude-desktop-limits\.test\.js/);
+  assert.match(content, /node --test [^\n]*test\/claude-desktop-limits\.test\.js/);
+  assert.match(content, /node --test [^\n]*test\/claude-desktop-live\.test\.js/);
   assert.match(content, /UsageLimitsPanel\.test\.jsx/);
   assert.match(content, /npm --prefix dashboard run typecheck/);
   assert.match(content, /-only-testing:TokenTrackerBarTests\/UsageLimitsRetentionTests/);

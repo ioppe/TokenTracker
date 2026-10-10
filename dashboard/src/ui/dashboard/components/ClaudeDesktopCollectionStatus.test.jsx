@@ -42,6 +42,21 @@ describe("ClaudeDesktopCollectionStatus", () => {
     expect(screen.getByText("没有可读取的本地 Token 用量记录")).toBeInTheDocument();
   });
 
+  it("labels current API quota as live and shows actionable refresh failures", () => {
+    const liveAccount = {
+      ...quotaOnly, source: "desktop-api", quota_refresh_status: "live", stale: false,
+    };
+    const { rerender } = render(<ClaudeDesktopCollectionStatus accounts={[liveAccount]} />);
+    expect(screen.getByText(/Live quota:.*1%.*0%/)).toBeInTheDocument();
+    const failedAccount = {
+      ...quotaOnly, quota_refresh_status: "failed", quota_refresh_error: "keychain-access-required",
+    };
+    rerender(<ClaudeDesktopCollectionStatus accounts={[failedAccount]} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Claude keychain access required");
+    expect(screen.getByText(/Quota snapshot:/)).toBeInTheDocument();
+    expect(screen.queryByText(/Live quota:/)).not.toBeInTheDocument();
+  });
+
   it("does not create a desktop provider when no local profile was detected", () => {
     const { container } = render(<ClaudeDesktopCollectionStatus accounts={[]} />);
     expect(container).toBeEmptyDOMElement();

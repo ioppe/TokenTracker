@@ -1,6 +1,6 @@
 import React from "react";
 import { copy, getCopyLocale } from "../../../lib/copy";
-import { desktopAccountName, desktopTokenUsageText, hasDesktopQuota } from "../../../lib/claude-desktop-display.js";
+import { desktopAccountName, desktopTokenUsageText, hasDesktopQuota, desktopQuotaLabel, desktopQuotaRefreshText } from "../../../lib/claude-desktop-display.js";
 import { ProviderIcon } from "./ProviderIcon.jsx";
 
 export function ClaudeDesktopCollectionStatus({ accounts = [] }) {
@@ -12,6 +12,7 @@ export function ClaudeDesktopCollectionStatus({ accounts = [] }) {
         {copy("usage.claude_desktop.local_scope")}
       </h3>
       {detected.map((account) => {
+        const refreshError = desktopQuotaRefreshText(account);
         const captured = Date.parse(account.cached_at);
         const sampledAt = Number.isFinite(captured) ? new Intl.DateTimeFormat(getCopyLocale(), {
           month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
@@ -37,11 +38,12 @@ export function ClaudeDesktopCollectionStatus({ accounts = [] }) {
               ) : null}
               {quota ? (
                 <p className="tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
-                  {copy("limits.claude_desktop.history")}{": "}{quota}
+                  {desktopQuotaLabel(account)}{": "}{quota}
                   {sampledAt ? <span>{" | "}{copy("limits.claude_desktop.sampled_at", { time: sampledAt })}</span> : null}
                   {account.stale ? <span>{" | "}{copy("limits.provenance.stale")}</span> : null}
                 </p>
               ) : null}
+              {refreshError ? <p className="text-oai-gray-600 dark:text-oai-gray-300" role="status">{refreshError}</p> : null}
             </div>
           </div>
         );

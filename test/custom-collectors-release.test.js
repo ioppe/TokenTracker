@@ -22,7 +22,8 @@ function fixture(t) {
   fs.mkdirSync(lib, { recursive: true });
   fs.mkdirSync(assets, { recursive: true });
   fs.writeFileSync(path.join(lib, "claude-desktop.js"), "module.exports = {};");
-  fs.writeFileSync(path.join(lib, "claude-desktop-limits.js"), "module.exports = {};");
+  fs.writeFileSync(path.join(lib, "claude-desktop-limits.js"), 'require("./claude-desktop-live");');
+  fs.writeFileSync(path.join(lib, "claude-desktop-live.js"), "module.exports = {};");
   fs.writeFileSync(path.join(lib, "usage-limits.js"), 'require("./claude-desktop-limits");');
   fs.writeFileSync(path.join(assets, "index.js"), 'copy("usage.claude_desktop.local_scope");');
   return { app, lib, assets };
@@ -46,6 +47,15 @@ test("custom package validation rejects an official or stale embedded payload", 
   fs.writeFileSync(path.join(f.lib, "usage-limits.js"), 'require("./claude-desktop-limits");');
   fs.writeFileSync(path.join(f.assets, "index.js"), "old dashboard");
   assert.throws(() => validateBundledCollectors(f.app), /missing Claude Desktop/);
+});
+
+test("custom package validation requires the live collector and its wiring", (t) => {
+  const f = fixture(t);
+  fs.writeFileSync(path.join(f.lib, "claude-desktop-limits.js"), "module.exports = {};");
+  assert.throws(() => validateBundledCollectors(f.app), /does not load live quota/);
+  fs.writeFileSync(path.join(f.lib, "claude-desktop-limits.js"), 'require("./claude-desktop-live");');
+  fs.unlinkSync(path.join(f.lib, "claude-desktop-live.js"));
+  assert.throws(() => validateBundledCollectors(f.app), /Missing bundled collector: claude-desktop-live/);
 });
 
 test("custom app stamping preserves the stable platform version and pins the fork feed", (t) => {

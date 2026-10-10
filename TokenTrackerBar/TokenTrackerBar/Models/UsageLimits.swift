@@ -212,7 +212,7 @@ struct ClaudeDesktopAccount: Codable, Equatable, Identifiable {
     let profileName: String?
     let displayName: String?
     let metric: String
-    let cachedAt: String
+    let cachedAt: String?
     let stale: Bool
     let fiveHour: ClaudeWindow?
     let sevenDay: ClaudeWindow?
@@ -220,6 +220,9 @@ struct ClaudeDesktopAccount: Codable, Equatable, Identifiable {
     let tokenUsageCapturedAt: String?
     let tokenUsageTruncated: Bool?
     let tokenUsage: ClaudeDesktopTokenUsage?
+    let source: String?
+    let quotaRefreshStatus: String?
+    let quotaRefreshError: String?
 
     var id: String { profileID }
     var hasQuota: Bool { configured && metric == "quota-percent" && (fiveHour != nil || sevenDay != nil) }
@@ -239,6 +242,9 @@ struct ClaudeDesktopAccount: Codable, Equatable, Identifiable {
         case tokenUsageCapturedAt = "token_usage_captured_at"
         case tokenUsageTruncated = "token_usage_truncated"
         case tokenUsage = "token_usage"
+        case source
+        case quotaRefreshStatus = "quota_refresh_status"
+        case quotaRefreshError = "quota_refresh_error"
     }
 }
 

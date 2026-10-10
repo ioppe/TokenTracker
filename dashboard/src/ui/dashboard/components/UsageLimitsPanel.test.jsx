@@ -129,6 +129,31 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByRole("button", { name: /Claude Desktop Default account/ })).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("hides unverified Claude Code and Codex quota rows while keeping Claude Desktop rows", () => {
+    render(
+      <UsageLimitsPanel
+        claude={{
+          configured: true,
+          five_hour: { utilization: 42 },
+          desktop_accounts: [desktopAccount()],
+        }}
+        codex={{
+          configured: true,
+          primary_window: { used_percent: 28 },
+        }}
+        order={["claude", "codex"]}
+        hiddenQuotaProviders={["claude", "codex"]}
+      />,
+    );
+
+    expect(screen.queryByText("Claude", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("Codex", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("Claude Desktop Default account")).toBeInTheDocument();
+    expect(screen.getByText("12%")).toBeInTheDocument();
+    expect(screen.queryByText("42%")).not.toBeInTheDocument();
+    expect(screen.queryByText("28%")).not.toBeInTheDocument();
+  });
+
   it("shows observed Code/Cowork token usage and an API estimate when priced", () => {
     render(<UsageLimitsPanel claude={{ configured: false, desktop_accounts: [desktopAccount({
       metric: "token-usage",

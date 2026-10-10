@@ -10,13 +10,14 @@ const {
   claudeDesktopAgentSessionDirs,
 } = require("./claude-desktop");
 const { computeRowCost, getModelPricing } = require("./pricing");
+const { readClaudeDesktopLiveQuota } = require("./claude-desktop-live");
 
 const HISTORY_MAX_BYTES = 4 * 1024 * 1024;
 const AGENT_JSONL_MAX_BYTES = 16 * 1024 * 1024;
 const AGENT_MAX_FILES = 600;
 const AGENT_MAX_DEPTH = 16;
 const AGENT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
-const AGENT_USAGE_CACHE_VERSION = 2;
+const AGENT_USAGE_CACHE_VERSION = 3;
 const AGENT_USAGE_CACHE_MAX_BYTES = 32 * 1024 * 1024;
 const AGENT_USAGE_CACHE_DIR = "claude-desktop-usage";
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
@@ -409,7 +410,8 @@ async function listJsonlFiles(root, {
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         await walk(fullPath, depth + 1);
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".jsonl")) {
+      } else if (entry.isFile() && (entry.name.toLowerCase().endsWith(".jsonl")
+        || (path.basename(dir) === "usage-ledger" && /^\d{4}-\d{2}-\d{2}(?:\.\d+)?\.ndjson$/.test(entry.name)))) {
         files.push(fullPath);
       }
     }
@@ -639,31 +641,46 @@ function parseAgentUsageBuffer(raw, {
       } catch (_e) {
         record = null;
       }
-      const parts = usageEventParts(record);
-      const usage = normalizeClaudeDesktopUsage(parts.usage);
-      if (usage) {
-        usageRecords += 1;
-        const timestampMs = safeObservedTimestamp([
-          record.timestamp,
-          record.created_at,
-          record.time,
-          record.message?.created_at,
-          parts.event?.timestamp,
-          parts.event?.time,
-        ], fallbackMs, nowMs);
-        const identity = eventIdentityDigest(usageEventIdentity(parts, usage, timestampMs));
-        const candidate = {
-          identity,
-          model: parts.model,
-          usage,
-          timestampMs,
-          sessionId: parts.sessionId,
-          usageScope: parts.usageScope,
-        };
-        const previous = events.get(identity);
-        const selected = chooseUsageEvent(previous, candidate);
-        if (previous) duplicateRecords += 1;
-        events.set(identity, selected);
+      // Current Desktop builds can write a privacy-preserving per-turn ledger.
+      // Its model counts are already deltas; SDK modelUsage snapshots are not.
+      const ledger = record?.v === 1 && ["chat", "code", "cowork"].includes(record.surface)
+        && Number.isFinite(record.ts) && record.ts > 0 && record.ts <= nowMs + MAX_FUTURE_SKEW_MS
+        && record.models && typeof record.models === "object" && !Array.isArray(record.models);
+      const records = ledger ? Object.entries(record.models).map(([model, counts]) => ({
+        timestamp: record.ts, model, sessionId: record.sessionId,
+        id: `ledger:${record.sessionId || ""}:${record.origin || ""}:${record.ts}:${model}`,
+        usage: {
+          input_tokens: counts?.inputTokens, output_tokens: counts?.outputTokens,
+          cache_read_input_tokens: counts?.cacheReadTokens, cache_creation_input_tokens: counts?.cacheWriteTokens,
+        },
+      })) : [record];
+      for (const usageRecord of records) {
+        const parts = usageEventParts(usageRecord);
+        const usage = normalizeClaudeDesktopUsage(parts.usage);
+        if (usage) {
+          usageRecords += 1;
+          const timestampMs = safeObservedTimestamp([
+            usageRecord.timestamp,
+            usageRecord.created_at,
+            usageRecord.time,
+            usageRecord.message?.created_at,
+            parts.event?.timestamp,
+            parts.event?.time,
+          ], fallbackMs, nowMs);
+          const identity = eventIdentityDigest(usageEventIdentity(parts, usage, timestampMs));
+          const candidate = {
+            identity,
+            model: parts.model,
+            usage,
+            timestampMs,
+            sessionId: parts.sessionId,
+            usageScope: parts.usageScope,
+          };
+          const previous = events.get(identity);
+          const selected = chooseUsageEvent(previous, candidate);
+          if (previous) duplicateRecords += 1;
+          events.set(identity, selected);
+        }
       }
     }
     if (terminated) completedLines += 1;
@@ -820,12 +837,13 @@ function quotaWindow(value) {
   return { utilization: value, resets_at: null };
 }
 
-function normalizeClaudeDesktopHistory(history, { nowMs = Date.now() } = {}) {
+function normalizeClaudeDesktopHistory(history, { nowMs = Date.now(), orgHash = null } = {}) {
   if (history?.version !== 2 || !Array.isArray(history.samples) || !Number.isFinite(nowMs)) return null;
   let latest = null;
   for (const sample of history.samples) {
     if (!Number.isSafeInteger(sample?.t) || sample.t <= 0 || sample.t > nowMs
       || typeof sample.org !== "string" || !sample.org.trim()) continue;
+    if (orgHash && crypto.createHash("sha256").update(sample.org).digest("hex") !== orgHash) continue;
     if (!latest || sample.t >= latest.t) latest = sample;
   }
   // Choose the newest account observation before validating its windows: an
@@ -871,7 +889,8 @@ function profileMetadata(root, { home, env, platform }) {
 
 async function readClaudeDesktopUsageLimits({
   home = os.homedir(), env = process.env, platform = process.platform,
-  config = null, nowMs = Date.now(),
+  config = null, nowMs = Date.now(), fetchImpl = fetch, securityRunner,
+  forceRefresh = false, liveQuotaReader = readClaudeDesktopLiveQuota,
 } = {}) {
   const support = path.join(home, "Library", "Application Support", "CodexQuotaViewer");
   const [trackerConfig, names, selected] = await Promise.all([
@@ -881,15 +900,20 @@ async function readClaudeDesktopUsageLimits({
   ]);
   const profiles = discoverClaudeDesktopProfiles({ home, env, platform, config: trackerConfig });
   const accounts = await Promise.all(profiles.map(async (root) => {
-    const [history, tokenUsage] = await Promise.all([
+    const [history, tokenUsage, live] = await Promise.all([
       readJson(path.join(root, "plan-usage-history.json"), HISTORY_MAX_BYTES),
       readClaudeDesktopAgentUsage(root, {
         nowMs,
         cachePath: usageCachePath(home, root),
       }),
+      env.TOKENTRACKER_CLAUDE_DESKTOP_LIVE === "0" ? null
+        : liveQuotaReader(root, { platform, nowMs, fetchImpl, securityRunner, forceRefresh }),
     ]);
-    const limits = normalizeClaudeDesktopHistory(history, { nowMs });
-    if (!limits && !tokenUsage.detected) return null;
+    const { active_org_hash: orgHash, auth_detected: _authDetected, ...liveQuota } = live || {};
+    const limits = liveQuota.metric === "quota-percent" ? liveQuota
+      : normalizeClaudeDesktopHistory(history, { nowMs, orgHash });
+    if (!limits && !tokenUsage.detected && !live?.auth_detected
+      && !["keychain-access-required", "desktop-access-denied"].includes(live?.quota_refresh_error)) return null;
     const metadata = profileMetadata(root, { home, env, platform });
     const displayName = names?.[metadata.profile_id];
     const tokenUsageStatus = tokenUsage.token_usage
@@ -918,19 +942,22 @@ async function readClaudeDesktopUsageLimits({
       source: TOKEN_USAGE_SOURCE,
       metric: "token-usage",
       cached: false,
-      cached_at: tokenUsage.captured_at,
+      cached_at: tokenUsage.detected ? tokenUsage.captured_at : null,
       stale: false,
       five_hour: null,
       seven_day: null,
       provenance: {
         source: TOKEN_USAGE_SOURCE,
         confidence: tokenUsageStatus,
-        captured_at: tokenUsage.captured_at,
+        captured_at: tokenUsage.detected ? tokenUsage.captured_at : null,
         stale: false,
       },
     };
     return {
       ...base,
+      quota_refresh_status: live?.quota_refresh_status || "failed",
+      quota_refresh_error: live?.quota_refresh_error || null,
+      quota_retry_at: live?.quota_retry_at || null,
       ...tokenFields,
       ...metadata,
       display_name: typeof displayName === "string" && displayName.trim()

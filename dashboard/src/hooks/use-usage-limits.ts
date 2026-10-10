@@ -121,12 +121,15 @@ type ClaudeDesktopAccount = {
   readonly profile_name: string | null;
   readonly display_name: string | null;
   readonly is_selected: boolean;
-  readonly source: "local-history" | "local-agent-session";
+  readonly source: "local-history" | "local-agent-session" | "desktop-api";
   readonly metric: "quota-percent" | "token-usage";
-  readonly cached_at: string;
+  readonly cached_at: string | null;
   readonly stale: boolean;
-  readonly five_hour: { utilization: number; resets_at: null } | null;
-  readonly seven_day: { utilization: number; resets_at: null } | null;
+  readonly five_hour: { utilization: number; resets_at: string | null } | null;
+  readonly seven_day: { utilization: number; resets_at: string | null } | null;
+  readonly quota_refresh_status?: "live" | "failed";
+  readonly quota_refresh_error?: string | null;
+  readonly quota_retry_at?: string | null;
   readonly token_usage_status?: "observed" | "partial" | "unavailable";
   readonly token_usage_source?: string;
   readonly token_usage_files?: number;
@@ -235,6 +238,7 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
   const [isLoading, setIsLoading] = useState(localEnabled && !hasInitialState);
   const initialRefresh = Boolean(options?.initialRefresh);
   const publishToPreloadCache = Boolean(options?.publishToPreloadCache);
+  const manualRefreshes = useRef(0);
   // Mount/cache reads and an explicit refresh can overlap (for example when a
   // user clicks Refresh while the dashboard's preload request is still
   // resolving). Keep only the newest response. Without this guard a slower
@@ -283,6 +287,7 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
 
   const refresh = useCallback(async () => {
     if (!localEnabled) return;
+    manualRefreshes.current += 1;
     const isCurrent = beginRequest();
     try {
       const res = await getUsageLimits({
@@ -299,11 +304,13 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
       if (!isCurrent()) return;
       setError((err as Error)?.message || String(err));
       setIsLoading(false);
+    } finally {
+      manualRefreshes.current -= 1;
     }
   }, [beginRequest, localEnabled, publishSuccessfulState]);
 
   const refreshFromServerCache = useCallback(async () => {
-    if (!localEnabled) return;
+    if (!localEnabled || manualRefreshes.current > 0) return;
     const isCurrent = beginRequest();
     try {
       // Non-forcing read: serve from the server's cache rather than hitting
@@ -325,15 +332,13 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
     }
   }, [beginRequest, localEnabled, publishSuccessfulState]);
 
-  // Auto-refresh when the dashboard regains focus / becomes visible again —
-  // same throttled pattern as use-usage-data.ts, so a left-open Limits page
-  // picks up new window utilization without a manual reload.
+  // Visible pages poll the server cache; the server owns upstream TTL/cooldown.
   useEffect(() => {
     if (!localEnabled || typeof window === "undefined" || typeof document === "undefined") return;
     const MIN_GAP_MS = 15_000;
     let lastAt = Date.now(); // mount already fired the initial fetch below
     const maybeRefresh = () => {
-      if (document.visibilityState !== "visible") return;
+      if (document.visibilityState !== "visible" || manualRefreshes.current > 0) return;
       const nowMs = Date.now();
       if (nowMs - lastAt < MIN_GAP_MS) return;
       lastAt = nowMs;
@@ -341,9 +346,11 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
     };
     window.addEventListener("focus", maybeRefresh);
     document.addEventListener("visibilitychange", maybeRefresh);
+    const interval = window.setInterval(maybeRefresh, 60_000);
     return () => {
       window.removeEventListener("focus", maybeRefresh);
       document.removeEventListener("visibilitychange", maybeRefresh);
+      window.clearInterval(interval);
     };
   }, [localEnabled, refreshFromServerCache]);
 

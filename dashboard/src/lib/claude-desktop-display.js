@@ -19,6 +19,24 @@ export function hasDesktopTokenData(account) {
     || account?.token_usage_status === "partial" || account?.token_usage_status === "unavailable";
 }
 
+export function desktopQuotaLabel(account) {
+  return copy(account?.source === "desktop-api" && account?.quota_refresh_status === "live"
+    ? "limits.claude_desktop.live" : "limits.claude_desktop.history");
+}
+
+export function desktopQuotaRefreshText(account) {
+  const keys = {
+    "keychain-access-required": "limits.claude_desktop.keychain_required",
+    "desktop-sign-in-required": "limits.claude_desktop.sign_in_required",
+    "desktop-access-denied": "limits.claude_desktop.access_denied",
+    "desktop-rate-limited": "limits.claude_desktop.rate_limited",
+    "desktop-request-timeout": "limits.claude_desktop.request_timeout",
+    "desktop-api-unavailable": "limits.claude_desktop.api_unavailable",
+    "desktop-quota-unavailable": "limits.claude_desktop.api_unavailable",
+  };
+  return keys[account?.quota_refresh_error] ? copy(keys[account.quota_refresh_error]) : null;
+}
+
 export function desktopTokenUsageText(account) {
   if (account?.token_usage_status === "unavailable") return copy("limits.claude_desktop.token_usage_unavailable");
   if (account?.token_usage_status === "partial" && !account?.token_usage) {

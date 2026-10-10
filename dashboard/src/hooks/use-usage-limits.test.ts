@@ -96,6 +96,54 @@ describe("useUsageLimits", () => {
     vi.mocked(publishUsageLimitsPreloadState).mockReset();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("polls an unchanged visible page without forcing every upstream provider", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.mocked(getUsageLimits).mockResolvedValue(freshLimits);
+    const { result, unmount } = renderHook(() => useUsageLimits({ initialState: { data: existingLimits } }));
+    expect(getUsageLimits).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(getUsageLimits).toHaveBeenCalledTimes(1);
+    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: false });
+    expect(result.current.data).toEqual(freshLimits);
+    unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(getUsageLimits).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses background polls while hidden and resumes when visible", async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    vi.mocked(getUsageLimits).mockResolvedValue(freshLimits);
+    const { unmount } = renderHook(() => useUsageLimits({ initialState: { data: existingLimits } }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(getUsageLimits).not.toHaveBeenCalled();
+    visibility.mockReturnValue("visible");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(getUsageLimits).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it("does not let periodic reads race a manual refresh", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    let resolve: (value: typeof freshLimits) => void = () => {};
+    vi.mocked(getUsageLimits).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const { result, unmount } = renderHook(() => useUsageLimits({ initialState: { data: existingLimits } }));
+    let refresh: Promise<void>;
+    act(() => { refresh = result.current.refresh(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(getUsageLimits).toHaveBeenCalledTimes(1);
+    await act(async () => { resolve(freshLimits); await refresh!; });
+    expect(result.current.data).toEqual(freshLimits);
+    unmount();
+  });
+
   it("uses reusable initial data immediately and writes the background refresh back to cache", async () => {
     vi.mocked(getUsageLimits).mockResolvedValue(freshLimits);
 

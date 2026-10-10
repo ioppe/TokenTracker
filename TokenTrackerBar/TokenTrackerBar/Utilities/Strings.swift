@@ -61,6 +61,16 @@ enum Strings {
     static var usageLimitsTitle: String { t("Limits", "限额", "限額", "上限", "한도") }
     static var claudeDesktopDefaultAccount: String { t("Default account", "默认账号", "預設帳號", "既定のアカウント", "기본 계정") }
     static var claudeDesktopQuotaSnapshot: String { t("Quota snapshot", "额度快照", "額度快照", "使用量スナップショット", "사용량 스냅샷") }
+    static var claudeDesktopLiveQuota: String { t("Live quota", "实时额度", "即時額度", "最新の使用量", "실시간 사용량") }
+    static func claudeDesktopQuotaError(_ code: String?) -> String? {
+        switch code {
+        case "keychain-access-required": return t("Claude keychain access required", "需要允许访问 Claude 钥匙串", "需要允許存取 Claude 鑰匙圈", "Claude キーチェーンへのアクセスが必要", "Claude 키체인 접근 필요")
+        case "desktop-sign-in-required": return t("Claude Desktop sign-in required", "需要重新登录 Claude Desktop", "需要重新登入 Claude Desktop", "Claude Desktop へのログインが必要", "Claude Desktop 로그인 필요")
+        case "desktop-rate-limited": return t("Claude quota refresh is rate-limited", "Claude 额度查询被限流", "Claude 額度查詢被限流", "Claude 使用量の取得制限", "Claude 사용량 조회 제한")
+        case nil, "desktop-live-unsupported": return nil
+        default: return t("Claude quota refresh failed", "Claude 实时额度查询失败", "Claude 即時額度查詢失敗", "Claude 使用量の取得に失敗", "Claude 사용량 조회 실패")
+        }
+    }
     static var claudeDesktopTokenUsage: String { t("Token usage", "Token 用量", "Token 用量", "トークン使用量", "토큰 사용량") }
     static var claudeDesktopTokenUsageUnavailable: String { t("Token usage unavailable", "Token 用量不可用", "Token 用量不可用", "トークン使用量は利用できません", "토큰 사용량을 사용할 수 없음") }
     static var claudeDesktopTokenUsagePartial: String { t("Token usage is partial; some files were skipped", "Token 用量不完整，部分文件已跳过", "Token 用量不完整，部分檔案已略過", "トークン使用量は部分的です。一部のファイルをスキップしました", "토큰 사용량이 부분적이며 일부 파일을 건너뜀") }

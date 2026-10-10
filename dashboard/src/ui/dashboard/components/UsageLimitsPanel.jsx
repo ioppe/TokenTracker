@@ -5,6 +5,7 @@ import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { copy, getCopyLocale } from "../../../lib/copy";
 import {
   desktopAccountName, desktopTokenUsageText, hasDesktopQuota, hasDesktopTokenData,
+  desktopQuotaLabel, desktopQuotaRefreshText,
 } from "../../../lib/claude-desktop-display.js";
 import { LIMIT_DISPLAY_MODES } from "../../../hooks/use-limits-display-prefs.js";
 import {
@@ -1172,8 +1173,9 @@ function useWidestLabelWidth(containerRef) {
   return labelWidth;
 }
 
-export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, order, visibility, displayMode, subscriptions = [], showSubscriptions = true }) {
+export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, order, visibility, displayMode, hiddenQuotaProviders = [], subscriptions = [], showSubscriptions = true }) {
   const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin };
+  const hiddenQuotaProviderSet = new Set(Array.isArray(hiddenQuotaProviders) ? hiddenQuotaProviders : []);
   const containerRef = useRef(null);
   const labelWidth = useWidestLabelWidth(containerRef);
   const [expandedId, setExpandedId] = useState(null);
@@ -1231,16 +1233,29 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
           && (hasDesktopQuota(account) || hasDesktopTokenData(account)))
         : [];
       const subscription = subscriptionByProvider.get(id) || null;
-      const provider = !dataById[id]?.configured && desktopAccounts.length > 0 && !subscription
-        ? null : renderProviderGroup(
-        id,
-        dataById[id],
-        effectiveMode,
-        expandedId === id,
-        () => setExpandedId((prev) => (prev === id ? null : id)),
-        subscription,
-        now,
-      );
+      const provider = hiddenQuotaProviderSet.has(id)
+        ? subscription
+          ? renderUnlinkedProvider(
+            id,
+            null,
+            expandedId === id,
+            () => setExpandedId((prev) => (prev === id ? null : id)),
+            subscription,
+            now,
+            effectiveMode,
+          )
+          : null
+        : !dataById[id]?.configured && desktopAccounts.length > 0 && !subscription
+          ? null
+          : renderProviderGroup(
+            id,
+            dataById[id],
+            effectiveMode,
+            expandedId === id,
+            () => setExpandedId((prev) => (prev === id ? null : id)),
+            subscription,
+            now,
+          );
       return [provider, ...desktopAccounts.map((account) => {
         const key = `claude-desktop:${account.profile_id}`;
         const title = copy("limits.claude_desktop.title", { account: desktopAccountName(account) });
@@ -1253,7 +1268,7 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
         const hasTokenStatus = usageObserved || usageUnavailable || usagePartial;
         const hasQuota = hasDesktopQuota(account);
         const badge = <StatusBadge
-          label={hasQuota ? copy("limits.claude_desktop.history")
+          label={hasQuota ? desktopQuotaLabel(account)
             : copy("limits.claude_desktop.token_usage_badge")}
           age={ago(hasQuota ? account.cached_at : account.token_usage_captured_at)}
           tone={hasQuota ? account.stale ? "stale" : "cached"
@@ -1261,7 +1276,10 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
           tooltip={hasQuota && sampledAt
             ? copy("limits.claude_desktop.sampled_at", { time: sampledAt }) : null}
         />;
-        const tokenExtra = tokenText ? React.createElement(StatusLine, null, tokenText) : null;
+        const refreshError = desktopQuotaRefreshText(account);
+        const tokenExtra = React.createElement(React.Fragment, null,
+          tokenText ? React.createElement(StatusLine, null, tokenText) : null,
+          refreshError ? React.createElement(StatusLine, null, refreshError) : null);
         return renderConfiguredProvider(
           "claude", account, title, effectiveMode, expandedId === key,
           () => setExpandedId((prev) => prev === key ? null : key),

@@ -6,6 +6,7 @@ import { Popover } from "@base-ui/react/popover";
 import { useUsageLimits } from "../hooks/use-usage-limits";
 import { useLimitsDisplayPrefs } from "../hooks/use-limits-display-prefs.js";
 import { copy } from "../lib/copy";
+import { HIDDEN_UNVERIFIED_QUOTA_PROVIDERS } from "../lib/limits-display-policy.js";
 import { LimitsPageSkeleton } from "../components/LimitsPageSkeleton.jsx";
 import { UsageLimitsPanel } from "../ui/dashboard/components/UsageLimitsPanel.jsx";
 import { SubscriptionSettingsCard } from "../ui/dashboard/components/SubscriptionSettingsCard.jsx";
@@ -216,6 +217,7 @@ export function LimitsPage() {
                 order={prefs.order}
                 visibility={prefs.visibility}
                 displayMode={prefs.displayMode}
+                hiddenQuotaProviders={HIDDEN_UNVERIFIED_QUOTA_PROVIDERS}
                 subscriptions={subscriptions}
                 showSubscriptions={prefs.showSubscriptions !== false}
               />

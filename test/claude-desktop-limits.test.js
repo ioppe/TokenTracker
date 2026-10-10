@@ -98,6 +98,29 @@ test("desktop usage normalizes only structured non-negative token fields", () =>
   assert.equal(normalizeClaudeDesktopUsage({ input_tokens: "not-a-number" }), null);
 });
 
+test("Desktop usage-ledger NDJSON preserves per-model deltas and deduplicates copies", async (t) => {
+  const f = fixture(t);
+  const dir = path.join(f.root, "local-agent-mode-sessions", "account", "org", "usage-ledger");
+  fs.mkdirSync(dir, { recursive: true });
+  const ledger = { v: 1, ts: nowMs - 60_000, surface: "cowork", sessionId: "PRIVATE-SESSION", origin: "local",
+    models: {
+      "claude-sonnet-4": { inputTokens: 100, outputTokens: 9, cacheReadTokens: 20, cacheWriteTokens: 5 },
+      "claude-haiku-4-5": { inputTokens: 30, outputTokens: 4, cacheReadTokens: 10, cacheWriteTokens: 0 },
+    }, tools: { private_tool_name: 2 } };
+  fs.writeFileSync(path.join(dir, "2026-10-02.ndjson"), `${JSON.stringify(ledger)}\n`);
+  fs.writeFileSync(path.join(dir, "2026-10-02.1.ndjson"), `${JSON.stringify(ledger)}\n`);
+  // Unrelated NDJSON in a workspace is not a telemetry source.
+  fs.writeFileSync(path.join(path.dirname(dir), "2026-10-02.ndjson"), `${JSON.stringify({ ...ledger, ts: nowMs })}\n`);
+  const result = await readClaudeDesktopAgentUsage(f.root, { nowMs });
+  assert.equal(result.session_files, 2);
+  assert.equal(result.token_usage.total_tokens, 178);
+  assert.equal(result.token_usage.models.length, 2);
+  assert.equal(result.token_usage.aggregation.mode, "per-event");
+  assert.equal(result.token_usage.scan_stats.usage_events_deduplicated, 2);
+  assert.ok(!JSON.stringify(result).includes("PRIVATE"));
+  assert.ok(!JSON.stringify(result).includes("private_tool_name"));
+});
+
 test("desktop Agent/Cowork JSONL usage is deduplicated without returning message content", async (t) => {
   const f = fixture(t);
   const first = path.join(f.root, "local-agent-mode-sessions", "workspace", ".claude", "projects", "one.jsonl");

@@ -3791,11 +3791,11 @@ async function fetchUsageLimitsUncached({
 } = {}) {
   const nowMs = Date.now();
 
-  const [claudeOauth, claudeSubscription, codexAuth, claudeDesktopAccounts] = await Promise.all([
+  const claudeDesktopAccountsPromise = readClaudeDesktopUsageLimits({ home, env, platform, nowMs, fetchImpl, securityRunner, forceRefresh });
+  const [claudeOauth, claudeSubscription, codexAuth] = await Promise.all([
     Promise.resolve().then(() => readClaudeCodeOauthToken({ platform, securityRunner, home, nowMs })),
     Promise.resolve().then(() => detectClaudeCodeSubscriptionDetails({ platform, securityRunner, home })),
     readCodexAuthBundle({ home, env }),
-    readClaudeDesktopUsageLimits({ home, env, platform, nowMs }),
   ]);
   const claudeToken = claudeOauth?.accessToken || null;
   const claudeTokenExpiresAtMs = claudeOauth?.expiresAtMs ?? null;
@@ -4200,6 +4200,7 @@ async function fetchUsageLimitsUncached({
       : { configured: true, error: reason?.message || "Unknown error" };
   }
 
+  const claudeDesktopAccounts = await claudeDesktopAccountsPromise;
   const data = {
     fetched_at: new Date(nowMs).toISOString(),
     claude: {
